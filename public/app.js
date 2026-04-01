@@ -696,6 +696,15 @@ function App() {
   const [allBugs, setAllBugs]       = useState([]);
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [toasts, setToasts]         = useState([]);
+  const [theme, setTheme]           = useState(() => localStorage.getItem('bt_theme') || 'dark');
+
+  // Apply theme to <html> whenever it changes
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('bt_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
   const toast = (message, type='info') => {
     const id = Date.now();
@@ -828,6 +837,9 @@ function App() {
             <span className="search-icon">🔍</span>
             <input type="text" placeholder="Quick search…" onFocus={()=>setView('list')}/>
           </div>
+          <button className="theme-toggle" onClick={toggleTheme} title={theme==='dark'?'Switch to light mode':'Switch to dark mode'}>
+            {theme==='dark' ? '☀️' : '🌙'}
+          </button>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <div style={{textAlign:'right',display:'flex',flexDirection:'column'}}>
               <span style={{fontSize:13,fontWeight:500}}>{authUser.name}</span>
