@@ -73,9 +73,23 @@ CREATE TABLE IF NOT EXISTS user_roles (
 );
 
 -- ── bugs ───────────────────────────────────────────────────────
-CREATE TYPE issue_status   AS ENUM ('To Do', 'In Progress', 'In Review', 'Done');
-CREATE TYPE issue_priority AS ENUM ('Critical', 'High', 'Medium', 'Low');
-CREATE TYPE issue_type     AS ENUM ('Bug', 'Feature', 'Task', 'Improvement');
+DO $$ BEGIN
+  CREATE TYPE issue_status AS ENUM ('To Do', 'In Progress', 'In Review', 'Done');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE issue_priority AS ENUM ('Critical', 'High', 'Medium', 'Low');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE issue_type AS ENUM ('Bug', 'Feature', 'Task', 'Improvement');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS bugs (
   id          UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -106,6 +120,7 @@ CREATE OR REPLACE FUNCTION touch_updated_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
 $$;
+DROP TRIGGER IF EXISTS bugs_updated_at ON bugs;
 CREATE TRIGGER bugs_updated_at BEFORE UPDATE ON bugs FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 -- ── comments ───────────────────────────────────────────────────
@@ -118,7 +133,11 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 
 -- ── activity ───────────────────────────────────────────────────
-CREATE TYPE activity_type AS ENUM ('created', 'changed', 'commented');
+DO $$ BEGIN
+  CREATE TYPE activity_type AS ENUM ('created', 'changed', 'commented');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 CREATE TABLE IF NOT EXISTS activity (
   id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   bug_id      UUID          NOT NULL REFERENCES bugs(id) ON DELETE CASCADE,
