@@ -413,11 +413,25 @@ function KanbanBoard({ projects, users, currentProject, toast, currentUser }) {
 }
 
 // ── ProjectsPage ──────────────────────────────────────────────────────────────
-function ProjectsPage({ projects, setProjects, toast }) {
+function ProjectModal({ onClose, onCreate }) {
+  const [form,setForm]=useState({name:'',key:'',description:'',color:'#6366f1'});
+  const create=async e=>{e.preventDefault();if(!form.name||!form.key)return;await onCreate(form);setForm({name:'',key:'',description:'',color:'#6366f1'});};
+  return (
+    <Modal onClose={onClose}>
+      <div className="modal-header"><h2 className="modal-title">New Project</h2><button className="btn-icon" onClick={onClose}>X</button></div>
+      <form onSubmit={create}>
+        <div className="modal-body"><div className="form-group"><label className="form-label">Project Name *</label><input className="form-input" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value,key:e.target.value.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,4)}))} required autoFocus/></div><div className="form-group"><label className="form-label">Project Key *</label><input className="form-input" value={form.key} onChange={e=>setForm(f=>({...f,key:e.target.value.toUpperCase()}))} required maxLength={6}/></div><div className="form-group"><label className="form-label">Description</label><textarea className="form-textarea" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="form-group"><label className="form-label">Colour</label><div className="color-swatches">{COLORS.map(c=><div key={c} className={`swatch ${form.color===c?'selected':''}`} style={{background:c}} onClick={()=>setForm(f=>({...f,color:c}))}/>)}</div></div></div>
+        <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary">Create Project</button></div>
+      </form>
+    </Modal>
+  );
+}
+
+function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
   const [showCreate,setShowCreate]=useState(false);
   const [form,setForm]=useState({name:'',key:'',description:'',color:'#6366f1'});
   const colors=['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
-  const create=async e=>{e.preventDefault();if(!form.name||!form.key)return;const p=await api.post('/api/projects',form);setProjects(ps=>[...ps,p]);setForm({name:'',key:'',description:'',color:'#6366f1'});setShowCreate(false);toast('Project created','success');};
+  const create=async e=>{e.preventDefault();if(!form.name||!form.key)return;const p=await api.post('/api/projects',form);setProjects(ps=>[...ps,p]);setForm({name:'',key:'',description:'',color:'#6366f1'});setShowCreate(false);onProjectCreated?.(p);toast('Project created','success');};
   const del=async id=>{await api.delete(`/api/projects/${id}`);setProjects(ps=>ps.filter(p=>p.id!==id));toast('Project deleted','info');};
   return (
     <div>
@@ -695,6 +709,7 @@ function App() {
   const [users, setUsers]           = useState([]);
   const [allBugs, setAllBugs]       = useState([]);
   const [currentProjectId, setCurrentProjectId] = useState(null);
+  const [showSidebarProjectCreate, setShowSidebarProjectCreate] = useState(false);
   const [toasts, setToasts]         = useState([]);
   const [theme, setTheme]           = useState(() => localStorage.getItem('bt_theme') || 'dark');
 
@@ -746,6 +761,10 @@ function App() {
   };
 
   const currentProject = projects.find(p => p.id === currentProjectId) || null;
+  const handleProjectCreated = project => {
+    setCurrentProjectId(project.id);
+    setView('projects');
+  };
   const navItems = [
     { id:'dashboard', label:'Dashboard', icon:'📊' },
     { id:'board',     label:'Board',     icon:'📋' },
@@ -801,6 +820,7 @@ function App() {
           <div className="sidebar-label">Projects</div>
           <div className={`sidebar-item ${!currentProjectId?'active':''}`} onClick={()=>setCurrentProjectId(null)}>
             <span style={{width:10,height:10,borderRadius:'50%',background:'var(--muted)',flexShrink:0}}/><span className="label">All Projects</span>
+            <button className="btn-icon" style={{marginLeft:'auto',width:24,height:24,fontSize:14}} title="Create Project" onClick={e=>{e.stopPropagation();setShowSidebarProjectCreate(true);}}>+</button>
           </div>
           {projects.map(p => (
             <div key={p.id} className={`sidebar-item ${currentProjectId===p.id?'active':''}`} onClick={()=>setCurrentProjectId(p.id)}>
@@ -853,12 +873,13 @@ function App() {
           {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onNavigate={navigate}/>}
           {view==='board'     && <KanbanBoard projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
-          {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast}/>}
+          {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
           {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} toast={toast} currentUser={authUser}/>}
           {view==='settings'  && <SettingsPage org={authOrg} setOrg={setAuthOrg} currentUser={authUser} toast={toast}/>}
         </div>
       </main>
 
+      {showSidebarProjectCreate&&<ProjectModal onClose={()=>setShowSidebarProjectCreate(false)} onCreate={async form=>{const p=await api.post('/api/projects',form);setProjects(ps=>[...ps,p]);setShowSidebarProjectCreate(false);handleProjectCreated(p);toast('Project created','success');}}/>}
       <Toast toasts={toasts} dismiss={id=>setToasts(ts=>ts.filter(t=>t.id!==id))}/>
     </div>
   );
