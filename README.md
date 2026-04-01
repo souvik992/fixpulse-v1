@@ -2,10 +2,7 @@
 
 FixPulseHQ is a Jira-style issue tracker built as a single Node.js application with an Express API and a React frontend served from the same server.
 
-It supports company workspaces, JWT authentication, role-based team management, project-level issue tracking, dashboard analytics, and two storage modes:
-
-- PostgreSQL when the database is available
-- Local JSON file fallback when PostgreSQL is unavailable
+It supports company workspaces, JWT authentication, role-based team management, project-level issue tracking, dashboard analytics, and PostgreSQL-backed persistence.
 
 ## What The App Includes
 
@@ -28,7 +25,6 @@ It supports company workspaces, JWT authentication, role-based team management, 
 - Charts: Chart.js
 - Auth: JSON Web Tokens + bcrypt
 - Database: PostgreSQL via `pg`
-- Fallback persistence: local JSON file in `data/db.json`
 - Local development database: Docker Compose
 
 ## Project Structure
@@ -43,8 +39,6 @@ It supports company workspaces, JWT authentication, role-based team management, 
 |   |-- index.js
 |   |-- schema.sql
 |   `-- seed.sql
-|-- data/
-|   `-- db.json
 |-- server.js
 |-- package.json
 |-- docker-compose.yml
@@ -53,12 +47,7 @@ It supports company workspaces, JWT authentication, role-based team management, 
 
 ## How It Works
 
-When the server starts, it tries to connect to PostgreSQL using the values in `.env`.
-
-- If PostgreSQL is available, the app uses the database in `db/schema.sql`
-- If PostgreSQL is not available, the app automatically falls back to `data/db.json`
-
-This means you can run the app quickly without Docker, but the intended primary storage is PostgreSQL.
+When the server starts, it connects to PostgreSQL using the values in `.env`. If PostgreSQL is unavailable, the server exits instead of falling back to local file storage.
 
 ## Environment Variables
 
@@ -78,8 +67,6 @@ DB_PASSWORD=bugtracker_secret
 ```
 
 ## Running The App
-
-### Option 1: Run with PostgreSQL
 
 1. Install Node.js
 2. Install Docker Desktop
@@ -102,29 +89,6 @@ npm start
 ```
 
 6. Open:
-
-```text
-http://localhost:3000
-```
-
-### Option 2: Run without PostgreSQL
-
-If PostgreSQL is not running, the server will fall back to JSON file storage automatically.
-
-1. Install Node.js
-2. Install dependencies:
-
-```bash
-npm install
-```
-
-3. Start the app:
-
-```bash
-npm start
-```
-
-4. Open:
 
 ```text
 http://localhost:3000
