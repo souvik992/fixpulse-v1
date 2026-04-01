@@ -35,6 +35,8 @@ INSERT INTO roles (name, description, color, is_system) VALUES
   ('Admin', 'Full system access', '#ef4444', true),
   ('Project Manager', 'Project-level planning and coordination', '#f97316', true),
   ('Developer', 'Work on assigned issues', '#6366f1', true),
+  ('Frontend Developer', 'Work on assigned frontend issues', '#3b82f6', true),
+  ('Backend Developer', 'Work on assigned backend issues', '#2563eb', true),
   ('Tester', 'Create, verify, and report issues', '#10b981', true),
   ('Viewer', 'Read-only access to issues and reports', '#9ca3af', true)
 ON CONFLICT DO NOTHING;
@@ -67,6 +69,24 @@ JOIN permissions p ON p.name IN (
   'CREATE_ISSUE', 'EDIT_ISSUE', 'CHANGE_STATUS', 'COMMENT', 'VIEW_ISSUE'
 )
 WHERE r.name = 'Developer' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name IN (
+  'CREATE_ISSUE', 'EDIT_ISSUE', 'CHANGE_STATUS', 'COMMENT', 'VIEW_ISSUE'
+)
+WHERE r.name = 'Frontend Developer' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name IN (
+  'CREATE_ISSUE', 'EDIT_ISSUE', 'CHANGE_STATUS', 'COMMENT', 'VIEW_ISSUE'
+)
+WHERE r.name = 'Backend Developer' AND r.org_id IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission_id)

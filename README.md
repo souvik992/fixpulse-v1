@@ -119,6 +119,8 @@ http://localhost:3000
 - `admin`: full system access
 - `project_manager`: project-level control
 - `developer`: work on assigned issues
+- `frontend_developer`: frontend-focused developer access
+- `backend_developer`: backend-focused developer access
 - `tester`: create and verify bugs
 - `viewer`: read-only access
 

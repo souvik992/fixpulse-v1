@@ -16,7 +16,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'bugtracker_dev_secret';
 const JWT_EXPIRES = process.env.JWT_EXPIRES_IN || '7d';
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const camel = (row) => {
@@ -95,6 +95,19 @@ function denyMissingPermission(res, permission) {
   });
 }
 
+function normalizeAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => ({
+      name: String(item.name || 'attachment'),
+      type: String(item.type || 'application/octet-stream'),
+      size: Number.isFinite(Number(item.size)) ? Number(item.size) : 0,
+      dataUrl: String(item.dataUrl || ''),
+    }))
+    .filter((item) => item.dataUrl.startsWith('data:'));
+}
+
 async function enforceIssueWritePermissions(req, bug, changes) {
   const perms = await getScopedPermissions(req, bug.project_id);
 
@@ -103,7 +116,7 @@ async function enforceIssueWritePermissions(req, bug, changes) {
   }
 
   const required = new Set();
-  const editableFields = ['title', 'description', 'type', 'priority', 'labels'];
+  const editableFields = ['title', 'description', 'type', 'priority', 'labels', 'attachments', 'referenceLink', 'curlCommand'];
 
   if (editableFields.some((field) => changes[field] !== undefined)) {
     required.add(PERMISSIONS.EDIT_ISSUE);
@@ -328,7 +341,7 @@ app.get('/api/members', auth, async (req, res) => {
 app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
     const { name, email, role = 'developer', color = '#6366f1', password } = req.body;
-    const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'tester', 'viewer', 'qa']);
+    const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'frontend_developer', 'backend_developer', 'tester', 'viewer', 'qa']);
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email required' });
     }
@@ -363,7 +376,7 @@ app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async 
 app.put('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
     const { name, role, color } = req.body;
-    const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'tester', 'viewer', 'qa']);
+    const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'frontend_developer', 'backend_developer', 'tester', 'viewer', 'qa']);
     if (role && !allowedRoles.has(role)) {
       return res.status(400).json({ error: 'Unsupported role' });
     }
@@ -553,6 +566,9 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
       priority = 'Medium',
       assigneeId,
       labels = [],
+      attachments = [],
+      referenceLink = '',
+      curlCommand = '',
     } = req.body;
     const reporterId = req.user.id;
 
@@ -573,7 +589,7 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
     const number = sequence.rows[0]?.num ?? 1;
 
     const { rows } = await db.query(
-      'INSERT INTO bugs (org_id,key,project_id,title,description,type,priority,assignee_id,reporter_id,labels) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+      'INSERT INTO bugs (org_id,key,project_id,title,description,type,priority,assignee_id,reporter_id,labels,attachments,reference_link,curl_command) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *',
       [
         req.user.orgId,
         `${project.key}-${number}`,
@@ -585,6 +601,9 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
         assigneeId || null,
         reporterId,
         labels,
+        JSON.stringify(normalizeAttachments(attachments)),
+        String(referenceLink || ''),
+        String(curlCommand || ''),
       ]
     );
 
@@ -642,11 +661,17 @@ app.put('/api/bugs/:id', auth, async (req, res) => {
 
     for (const [key, value] of Object.entries(req.body)) {
       const column = fieldMap[key] || key.replace(/([A-Z])/g, '_$1').toLowerCase();
-      if (!['title', 'description', 'type', 'priority', 'status', 'assignee_id', 'labels'].includes(column)) {
+      if (!['title', 'description', 'type', 'priority', 'status', 'assignee_id', 'labels', 'attachments', 'reference_link', 'curl_command'].includes(column)) {
         continue;
       }
       sets.push(`${column}=$${index++}`);
-      values.push(value === '' ? null : value);
+      if (column === 'attachments') {
+        values.push(JSON.stringify(normalizeAttachments(value)));
+      } else if (column === 'reference_link' || column === 'curl_command') {
+        values.push(String(value || ''));
+      } else {
+        values.push(value === '' ? null : value);
+      }
     }
 
     if (sets.length) {
@@ -654,7 +679,7 @@ app.put('/api/bugs/:id', auth, async (req, res) => {
       await db.query(`UPDATE bugs SET ${sets.join(',')} WHERE id=$${index}`, values);
     }
 
-    for (const field of ['status', 'priority', 'assigneeId', 'type']) {
+    for (const field of ['status', 'priority', 'assigneeId', 'type', 'referenceLink', 'curlCommand']) {
       const column = fieldMap[field] || field.replace(/([A-Z])/g, '_$1').toLowerCase();
       if (
         req.body[field] !== undefined &&

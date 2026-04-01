@@ -110,6 +110,8 @@ const LEGACY_TO_RBAC = {
   admin: 'Admin',
   project_manager: 'Project Manager',
   developer: 'Developer',
+  frontend_developer: 'Frontend Developer',
+  backend_developer: 'Backend Developer',
   tester: 'Tester',
   qa: 'Tester',
   viewer: 'Viewer',

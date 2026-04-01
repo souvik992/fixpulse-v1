@@ -105,6 +105,8 @@ test('checkPermission can resolve project scope from request body', async () => 
 
 test('LEGACY_TO_RBAC includes the new built-in roles', () => {
   assert.equal(middleware.LEGACY_TO_RBAC.project_manager, 'Project Manager');
+  assert.equal(middleware.LEGACY_TO_RBAC.frontend_developer, 'Frontend Developer');
+  assert.equal(middleware.LEGACY_TO_RBAC.backend_developer, 'Backend Developer');
   assert.equal(middleware.LEGACY_TO_RBAC.tester, 'Tester');
   assert.equal(middleware.LEGACY_TO_RBAC.viewer, 'Viewer');
 });

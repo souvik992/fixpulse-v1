@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
   avatar        TEXT        NOT NULL,
   color         TEXT        NOT NULL DEFAULT '#6366f1',
   password_hash TEXT,
-  role          TEXT        NOT NULL DEFAULT 'developer', -- admin | project_manager | developer | tester | viewer | qa
+  role          TEXT        NOT NULL DEFAULT 'developer', -- admin | project_manager | developer | frontend_developer | backend_developer | tester | viewer | qa
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS bugs (
   assignee_id UUID           REFERENCES users(id) ON DELETE SET NULL,
   reporter_id UUID           REFERENCES users(id) ON DELETE SET NULL,
   labels      TEXT[]         NOT NULL DEFAULT '{}',
+  attachments JSONB          NOT NULL DEFAULT '[]'::jsonb,
+  reference_link TEXT        NOT NULL DEFAULT '',
+  curl_command TEXT          NOT NULL DEFAULT '',
   created_at  TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 );

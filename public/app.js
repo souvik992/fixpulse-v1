@@ -29,9 +29,20 @@ const typeIcon     = t => ({ Bug:'🐛', Feature:'✨', Task:'📋', Improvement
 const statusIcon   = s => ({ 'To Do':'○', 'In Progress':'◑', 'In Review':'◕', 'Done':'●' }[s]||'○');
 const timeAgo      = ts => { const d=Math.floor((Date.now()-new Date(ts))/1000); if(d<60)return 'just now'; if(d<3600)return `${Math.floor(d/60)}m ago`; if(d<86400)return `${Math.floor(d/3600)}h ago`; return `${Math.floor(d/86400)}d ago`; };
 const COLORS       = ['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
-const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', tester:'Tester', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Tester':'Tester', 'Viewer':'Viewer' };
-const ROLE_COLORS  = { admin:'#ef4444', project_manager:'#f97316', developer:'#6366f1', tester:'#10b981', viewer:'#9ca3af', qa:'#10b981', 'Admin':'#ef4444', 'Project Manager':'#f97316', 'Developer':'#6366f1', 'Tester':'#10b981', 'Viewer':'#9ca3af' };
+const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', frontend_developer:'Frontend Developer', backend_developer:'Backend Developer', tester:'Tester', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Developer':'Developer', 'Frontend Developer':'Frontend Developer', 'Backend Developer':'Backend Developer', 'Tester':'Tester', 'Viewer':'Viewer' };
+const ROLE_COLORS  = { admin:'#ef4444', project_manager:'#f97316', developer:'#6366f1', frontend_developer:'#3b82f6', backend_developer:'#2563eb', tester:'#10b981', viewer:'#9ca3af', qa:'#10b981', 'Admin':'#ef4444', 'Project Manager':'#f97316', 'Developer':'#6366f1', 'Frontend Developer':'#3b82f6', 'Backend Developer':'#2563eb', 'Tester':'#10b981', 'Viewer':'#9ca3af' };
 const ALL_PERMISSIONS = ['CREATE_ISSUE','EDIT_ISSUE','DELETE_ISSUE','ASSIGN_ISSUE','CHANGE_STATUS','COMMENT','VIEW_ISSUE','VIEW_REPORTS','MANAGE_PROJECT','MANAGE_USERS','CONFIGURE_WORKFLOW'];
+
+const readFilesAsAttachments = files => Promise.all(
+  [...files]
+    .filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'))
+    .map(file => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ name: file.name, type: file.type, size: file.size, dataUrl: reader.result });
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    }))
+);
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
 function Toast({ toasts, dismiss }) {
@@ -320,16 +331,44 @@ function AuthPage({ onAuth }) {
 // ── BugModal ──────────────────────────────────────────────────────────────────
 function BugModal({ bug, projects, users, currentProject, onClose, onSave, toast }) {
   const editing = !!bug;
-  const [form, setForm] = useState({ title:bug?.title||'', description:bug?.description||'', projectId:bug?.projectId||currentProject?.id||projects[0]?.id||'', type:bug?.type||'Bug', priority:bug?.priority||'Medium', assigneeId:bug?.assigneeId||'', labels:bug?.labels?.join(', ')||'' });
+  const [form, setForm] = useState({ title:bug?.title||'', description:bug?.description||'', projectId:bug?.projectId||currentProject?.id||projects[0]?.id||'', type:bug?.type||'Bug', priority:bug?.priority||'Medium', assigneeId:bug?.assigneeId||'', labels:bug?.labels?.join(', ')||'', attachments:bug?.attachments||[], referenceLink:bug?.referenceLink||'', curlCommand:bug?.curlCommand||'' });
+  const [projectPermissions, setProjectPermissions] = useState(new Set());
+  const [showCurl, setShowCurl] = useState(!!bug?.curlCommand);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  useEffect(()=>{
+    if (!form.projectId) { setProjectPermissions(new Set()); return; }
+    api.get(`/api/rbac/me/permissions?projectId=${form.projectId}`)
+      .then(res => setProjectPermissions(new Set(res.permissions || [])))
+      .catch(() => setProjectPermissions(new Set()));
+  },[form.projectId]);
   const handleSubmit = async e => {
     e.preventDefault(); if (!form.title.trim()) return;
-    const payload={...form, labels:form.labels?form.labels.split(',').map(l=>l.trim()).filter(Boolean):[]};
+    const payload={...form, labels:form.labels?form.labels.split(',').map(l=>l.trim()).filter(Boolean):[], referenceLink:(form.referenceLink||'').trim(), curlCommand:(form.curlCommand||'').trim()};
+    if (!projectPermissions.has('ASSIGN_ISSUE')) {
+      delete payload.assigneeId;
+    }
     try {
-      if (editing) { const u=await api.put(`/api/bugs/${bug.id}`,payload); toast('Issue updated','success'); onSave(u); }
-      else { const c=await api.post('/api/bugs',payload); toast('Issue created','success'); onSave(c); }
+      if (editing) {
+        const u=await api.put(`/api/bugs/${bug.id}`,payload);
+        if (u?.error) { toast(u.error,'error'); return; }
+        toast('Issue updated','success'); onSave(u);
+      }
+      else {
+        const c=await api.post('/api/bugs',payload);
+        if (c?.error) { toast(c.error,'error'); return; }
+        toast('Issue created','success'); onSave(c);
+      }
     } catch { toast('Something went wrong','error'); }
   };
+  const addAttachments = async files => {
+    try {
+      const next = await readFilesAsAttachments(files);
+      set('attachments', [...form.attachments, ...next]);
+    } catch {
+      toast('Unable to read selected files','error');
+    }
+  };
+  const removeAttachment = index => set('attachments', form.attachments.filter((_, i) => i !== index));
   return (
     <Modal onClose={onClose}>
       <div className="modal-header"><h2 className="modal-title">{editing?'Edit Issue':'Create Issue'}</h2><button className="btn-icon" onClick={onClose}>✕</button></div>
@@ -343,9 +382,36 @@ function BugModal({ bug, projects, users, currentProject, onClose, onSave, toast
           </div>
           <div className="form-row">
             <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={form.priority} onChange={e=>set('priority',e.target.value)}>{['Critical','High','Medium','Low'].map(p=><option key={p}>{p}</option>)}</select></div>
-            <div className="form-group"><label className="form-label">Assignee</label><select className="form-select" value={form.assigneeId} onChange={e=>set('assigneeId',e.target.value)}><option value="">Unassigned</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+            <div className="form-group"><label className="form-label">Assignee</label><select className="form-select" value={form.assigneeId} onChange={e=>set('assigneeId',e.target.value)} disabled={!projectPermissions.has('ASSIGN_ISSUE')}><option value="">Unassigned</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>{!projectPermissions.has('ASSIGN_ISSUE')&&<div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>You do not have permission to assign issues in this project.</div>}</div>
           </div>
           <div className="form-group"><label className="form-label">Labels (comma separated)</label><input className="form-input" value={form.labels} onChange={e=>set('labels',e.target.value)} placeholder="e.g. frontend, auth, critical" /></div>
+          <div className="form-group"><label className="form-label">Reference Link</label><input className="form-input" value={form.referenceLink} onChange={e=>set('referenceLink',e.target.value)} placeholder="https://example.com/ticket-or-doc" /></div>
+          <div className="form-group">
+            <label className="form-label">Attachments</label>
+            <input className="form-input" type="file" accept="image/*,video/*" multiple onChange={e=>{ if (e.target.files?.length) addAttachments(e.target.files); e.target.value=''; }} />
+            <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>You can attach multiple images or videos.</div>
+            {form.attachments.length>0&&<div style={{display:'grid',gap:8,marginTop:12}}>
+              {form.attachments.map((file,index)=>(
+                <div key={`${file.name}-${index}`} style={{display:'flex',alignItems:'center',gap:10,padding:10,border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--surface2)'}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{file.name}</div>
+                    <div style={{fontSize:11,color:'var(--muted)'}}>{file.type} · {(file.size/1024/1024).toFixed(2)} MB</div>
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={()=>removeAttachment(index)}>Remove</button>
+                </div>
+              ))}
+            </div>}
+          </div>
+          <div className="form-group">
+            {!showCurl && <button type="button" className="btn btn-ghost btn-sm" onClick={()=>setShowCurl(true)}>+ Add cURL</button>}
+            {showCurl && <>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                <label className="form-label" style={{marginBottom:0}}>cURL Command</label>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>{setShowCurl(false);set('curlCommand','');}}>Hide</button>
+              </div>
+              <textarea className="form-textarea" value={form.curlCommand} onChange={e=>set('curlCommand',e.target.value)} placeholder="curl -X POST https://api.example.com/..." style={{minHeight:120,fontFamily:'monospace'}} />
+            </>}
+          </div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary">{editing?'Save Changes':'Create Issue'}</button></div>
       </form>
@@ -359,8 +425,20 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
   const [editing,setEditing]=useState(false);
   const [comment,setComment]=useState('');
   const [tab,setTab]=useState('comments');
+  const [projectPermissions, setProjectPermissions] = useState(new Set());
+  const [showCurl, setShowCurl] = useState(false);
   useEffect(()=>{ api.get(`/api/bugs/${bugId}`).then(setBug); },[bugId]);
-  const updateField = async (field,value) => { const u=await api.put(`/api/bugs/${bugId}`,{[field]:value}); setBug(u); onUpdate(u); toast('Updated','success'); };
+  useEffect(()=>{
+    if (!bug?.projectId) return;
+    api.get(`/api/rbac/me/permissions?projectId=${bug.projectId}`)
+      .then(res => setProjectPermissions(new Set(res.permissions || [])))
+      .catch(() => setProjectPermissions(new Set()));
+  },[bug?.projectId]);
+  const updateField = async (field,value) => {
+    const u=await api.put(`/api/bugs/${bugId}`,{[field]:value});
+    if (u?.error) { toast(u.error,'error'); return; }
+    setBug(u); onUpdate(u); toast('Updated','success');
+  };
   const addComment = async () => {
     if (!comment.trim()) return;
     await api.post(`/api/bugs/${bugId}/comments`,{text:comment});
@@ -390,6 +468,24 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
           <div className="detail-main">
             <div className="detail-section"><h4>Description</h4>{bug.description?<div className="detail-description">{bug.description}</div>:<div className="detail-description" style={{color:'var(--muted)',fontStyle:'italic'}}>No description provided.</div>}</div>
             {bug.labels?.length>0&&<div className="detail-section"><h4>Labels</h4><div className="flex gap-1 flex-wrap">{bug.labels.map(l=><span key={l} className="label-chip">{l}</span>)}</div></div>}
+            {bug.referenceLink&&<div className="detail-section"><h4>Reference Link</h4><a href={bug.referenceLink} target="_blank" rel="noreferrer" style={{color:'var(--primary)',wordBreak:'break-all'}}>{bug.referenceLink}</a></div>}
+            {bug.attachments?.length>0&&<div className="detail-section"><h4>Attachments</h4><div style={{display:'grid',gap:12}}>
+              {bug.attachments.map((file,index)=>(
+                <div key={`${file.name}-${index}`} style={{padding:12,border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--surface2)'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:10}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{file.name}</div>
+                      <div style={{fontSize:11,color:'var(--muted)'}}>{file.type} · {(Number(file.size||0)/1024/1024).toFixed(2)} MB</div>
+                    </div>
+                    <a className="btn btn-ghost btn-sm" href={file.dataUrl} download={file.name}>Download</a>
+                  </div>
+                  {file.type?.startsWith('image/')&&<img src={file.dataUrl} alt={file.name} style={{maxWidth:'100%',borderRadius:12,border:'1px solid var(--border)'}} />}
+                  {file.type?.startsWith('video/')&&<video src={file.dataUrl} controls style={{width:'100%',borderRadius:12,border:'1px solid var(--border)'}} />}
+                </div>
+              ))}
+            </div></div>}
+            {(bug.curlCommand || showCurl)&&<div className="detail-section"><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}><h4 style={{margin:0}}>cURL</h4><button className="btn btn-ghost btn-sm" onClick={()=>setShowCurl(v=>!v)}>{showCurl?'Hide':'Show'}</button></div>{showCurl&&<pre style={{margin:0,padding:14,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',overflowX:'auto',whiteSpace:'pre-wrap',fontFamily:'monospace',fontSize:12}}>{bug.curlCommand || 'No cURL command added.'}</pre>}</div>}
+            {!bug.curlCommand&&<div className="detail-section"><button className="btn btn-ghost btn-sm" onClick={()=>setShowCurl(true)}>+ Show cURL field</button></div>}
             <div className="tabs">
               <button className={`tab ${tab==='comments'?'active':''}`} onClick={()=>setTab('comments')}>💬 Comments ({bug.comments?.length||0})</button>
               <button className={`tab ${tab==='activity'?'active':''}`} onClick={()=>setTab('activity')}>📜 Activity</button>
@@ -405,7 +501,7 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
             <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16}}>
               <div className="detail-field"><div className="detail-field-label">Status</div><select className="form-select" value={bug.status} onChange={e=>updateField('status',e.target.value)}>{['To Do','In Progress','In Review','Done'].map(s=><option key={s}>{s}</option>)}</select></div>
               <div className="detail-field"><div className="detail-field-label">Priority</div><select className="form-select" value={bug.priority} onChange={e=>updateField('priority',e.target.value)}>{['Critical','High','Medium','Low'].map(p=><option key={p}>{p}</option>)}</select></div>
-              <div className="detail-field"><div className="detail-field-label">Assignee</div><select className="form-select" value={bug.assigneeId||''} onChange={e=>updateField('assigneeId',e.target.value)}><option value="">Unassigned</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+              <div className="detail-field"><div className="detail-field-label">Assignee</div><select className="form-select" value={bug.assigneeId||''} onChange={e=>updateField('assigneeId',e.target.value)} disabled={!projectPermissions.has('ASSIGN_ISSUE')}><option value="">Unassigned</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>{!projectPermissions.has('ASSIGN_ISSUE')&&<div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>You do not have permission to reassign this issue.</div>}</div>
               <hr className="divider"/>
               <div className="detail-field"><div className="detail-field-label">Project</div><div className="detail-field-value" style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:10,height:10,borderRadius:'50%',background:project?.color}}/>{project?.name}</div></div>
               <div className="detail-field"><div className="detail-field-label">Reporter</div><div className="detail-field-value" style={{display:'flex',alignItems:'center',gap:6}}>{reporter?<><Avatar user={reporter} size="xs"/>{reporter.name}</>:'Unknown'}</div></div>
@@ -421,9 +517,10 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
-function Dashboard({ projects, users, currentProject, onNavigate }) {
+function Dashboard({ projects, users, currentProject, onNavigate, currentUser, toast }) {
   const [stats,setStats]=useState(null);
   const [recentBugs,setRecentBugs]=useState([]);
+  const [selectedBug,setSelectedBug]=useState(null);
   const lineRef=useRef(null),doughnutRef=useRef(null),barRef=useRef(null);
   const lineChart=useRef(null),doughnutChart=useRef(null),barChart=useRef(null);
   useEffect(()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; api.get(url).then(setStats); const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; api.get(bu).then(b=>setRecentBugs(b.slice(0,5))); },[currentProject]);
@@ -455,9 +552,10 @@ function Dashboard({ projects, users, currentProject, onNavigate }) {
         <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:16}}>Recent Issues</h3>
         {recentBugs.length===0?<div className="text-muted text-sm">No issues found.</div>:(
           <table className="bug-table"><thead><tr><th>Key</th><th>Title</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Raised By</th><th>Updated</th></tr></thead>
-          <tbody>{recentBugs.map(bug=>{const assignee=users.find(u=>u.id===bug.assigneeId);const reporter=users.find(u=>u.id===bug.reporterId);return(<tr key={bug.id} onClick={()=>onNavigate('detail',bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><span className="text-muted text-sm">{timeAgo(bug.updatedAt)}</span></td></tr>);})}</tbody></table>
+          <tbody>{recentBugs.map(bug=>{const assignee=users.find(u=>u.id===bug.assigneeId);const reporter=users.find(u=>u.id===bug.reporterId);return(<tr key={bug.id} onClick={()=>setSelectedBug(bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><span className="text-muted text-sm">{timeAgo(bug.updatedAt)}</span></td></tr>);})}</tbody></table>
         )}
       </div>
+      {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const nextStats = await api.get(url); setStats(nextStats); setSelectedBug(null); }}/>}
     </div>
   );
 }
@@ -615,7 +713,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
     navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   };
 
-  const roleOrder = { admin:0, project_manager:1, developer:2, tester:3, qa:3, viewer:4 };
+  const roleOrder = { admin:0, project_manager:1, developer:2, frontend_developer:3, backend_developer:4, tester:5, qa:5, viewer:6 };
   const sorted = [...users].sort((a,b) => (roleOrder[a.role]||9) - (roleOrder[b.role]||9));
 
   return (
@@ -623,7 +721,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
       <div className="page-header">
         <div>
           <h1>Team Members</h1>
-          <p>{users.length} member{users.length!==1?'s':''} · {users.filter(u=>u.role==='admin').length} admin · {users.filter(u=>u.role==='project_manager').length} project manager · {users.filter(u=>u.role==='developer').length} developer · {users.filter(u=>u.role==='tester' || u.role==='qa').length} tester · {users.filter(u=>u.role==='viewer').length} viewer</p>
+          <p>{users.length} member{users.length!==1?'s':''} · {users.filter(u=>u.role==='admin').length} admin · {users.filter(u=>u.role==='project_manager').length} project manager · {users.filter(u=>u.role==='developer').length} developer · {users.filter(u=>u.role==='frontend_developer').length} frontend · {users.filter(u=>u.role==='backend_developer').length} backend · {users.filter(u=>u.role==='tester' || u.role==='qa').length} tester · {users.filter(u=>u.role==='viewer').length} viewer</p>
         </div>
         {isAdmin && <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Member</button>}
       </div>
@@ -664,6 +762,8 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
                     <option value="admin">Admin</option>
                     <option value="project_manager">Project Manager</option>
                     <option value="developer">Developer</option>
+                    <option value="frontend_developer">Frontend Developer</option>
+                    <option value="backend_developer">Backend Developer</option>
                     <option value="tester">Tester</option>
                     <option value="viewer">Viewer</option>
                   </select>
@@ -689,6 +789,8 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
                 <select className="form-select" value={form.role} onChange={e=>setF('role',e.target.value)}>
                   <option value="project_manager">Project Manager</option>
                   <option value="developer">Developer</option>
+                  <option value="frontend_developer">Frontend Developer</option>
+                  <option value="backend_developer">Backend Developer</option>
                   <option value="tester">Tester</option>
                   <option value="viewer">Viewer</option>
                   <option value="admin">Admin</option>
@@ -1202,7 +1304,7 @@ function App() {
         </div>
 
         <div className="content">
-          {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onNavigate={navigate}/>}
+          {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onNavigate={navigate} currentUser={authUser} toast={toast}/>}
           {view==='board'     && <KanbanBoard projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
