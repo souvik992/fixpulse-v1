@@ -8,11 +8,108 @@ INSERT INTO organizations (id, name, slug, color) VALUES
 ON CONFLICT DO NOTHING;
 
 -- Users
-INSERT INTO users (id, org_id, name, email, avatar, color) VALUES
-  ('a1000000-0000-0000-0000-000000000001', '90000000-0000-0000-0000-000000000001', 'Alice Johnson', 'alice@company.com', 'AJ', '#6366f1'),
-  ('a1000000-0000-0000-0000-000000000002', '90000000-0000-0000-0000-000000000001', 'Bob Smith',     'bob@company.com',   'BS', '#10b981'),
-  ('a1000000-0000-0000-0000-000000000003', '90000000-0000-0000-0000-000000000001', 'Carol White',   'carol@company.com', 'CW', '#f59e0b'),
-  ('a1000000-0000-0000-0000-000000000004', '90000000-0000-0000-0000-000000000001', 'David Lee',     'david@company.com', 'DL', '#ef4444')
+INSERT INTO users (id, org_id, name, email, avatar, color, role) VALUES
+  ('a1000000-0000-0000-0000-000000000001', '90000000-0000-0000-0000-000000000001', 'Alice Johnson', 'alice@company.com', 'AJ', '#6366f1', 'admin'),
+  ('a1000000-0000-0000-0000-000000000002', '90000000-0000-0000-0000-000000000001', 'Bob Smith',     'bob@company.com',   'BS', '#10b981', 'project_manager'),
+  ('a1000000-0000-0000-0000-000000000003', '90000000-0000-0000-0000-000000000001', 'Carol White',   'carol@company.com', 'CW', '#f59e0b', 'tester'),
+  ('a1000000-0000-0000-0000-000000000004', '90000000-0000-0000-0000-000000000001', 'David Lee',     'david@company.com', 'DL', '#ef4444', 'developer')
+ON CONFLICT DO NOTHING;
+
+-- Permissions
+INSERT INTO permissions (name, description) VALUES
+  ('CREATE_ISSUE', 'Create issues'),
+  ('EDIT_ISSUE', 'Edit issue fields'),
+  ('DELETE_ISSUE', 'Delete issues'),
+  ('ASSIGN_ISSUE', 'Assign issues to users'),
+  ('CHANGE_STATUS', 'Transition issue status'),
+  ('COMMENT', 'Comment on issues'),
+  ('VIEW_ISSUE', 'View issues'),
+  ('VIEW_REPORTS', 'View dashboards and reports'),
+  ('MANAGE_PROJECT', 'Create, update, and manage projects'),
+  ('MANAGE_USERS', 'Manage workspace users and role assignments'),
+  ('CONFIGURE_WORKFLOW', 'Configure organization and workflow settings')
+ON CONFLICT (name) DO NOTHING;
+
+-- System roles
+INSERT INTO roles (name, description, color, is_system) VALUES
+  ('Admin', 'Full system access', '#ef4444', true),
+  ('Project Manager', 'Project-level planning and coordination', '#f97316', true),
+  ('Developer', 'Work on assigned issues', '#6366f1', true),
+  ('Tester', 'Create, verify, and report issues', '#10b981', true),
+  ('Viewer', 'Read-only access to issues and reports', '#9ca3af', true)
+ON CONFLICT DO NOTHING;
+
+-- Role permissions
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name IN (
+  'CREATE_ISSUE', 'EDIT_ISSUE', 'DELETE_ISSUE', 'ASSIGN_ISSUE', 'CHANGE_STATUS',
+  'COMMENT', 'VIEW_ISSUE', 'VIEW_REPORTS', 'MANAGE_PROJECT', 'MANAGE_USERS', 'CONFIGURE_WORKFLOW'
+)
+WHERE r.name = 'Admin' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name IN (
+  'CREATE_ISSUE', 'EDIT_ISSUE', 'DELETE_ISSUE', 'ASSIGN_ISSUE', 'CHANGE_STATUS',
+  'COMMENT', 'VIEW_ISSUE', 'VIEW_REPORTS', 'MANAGE_PROJECT'
+)
+WHERE r.name = 'Project Manager' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name IN (
+  'CREATE_ISSUE', 'EDIT_ISSUE', 'CHANGE_STATUS', 'COMMENT', 'VIEW_ISSUE'
+)
+WHERE r.name = 'Developer' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name IN (
+  'CREATE_ISSUE', 'EDIT_ISSUE', 'CHANGE_STATUS', 'COMMENT', 'VIEW_ISSUE', 'VIEW_REPORTS'
+)
+WHERE r.name = 'Tester' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name IN (
+  'VIEW_ISSUE', 'VIEW_REPORTS'
+)
+WHERE r.name = 'Viewer' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+-- User role assignments
+INSERT INTO user_roles (user_id, role_id, org_id)
+SELECT 'a1000000-0000-0000-0000-000000000001', r.id, '90000000-0000-0000-0000-000000000001'
+FROM roles r
+WHERE r.name = 'Admin' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO user_roles (user_id, role_id, org_id)
+SELECT 'a1000000-0000-0000-0000-000000000002', r.id, '90000000-0000-0000-0000-000000000001'
+FROM roles r
+WHERE r.name = 'Project Manager' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO user_roles (user_id, role_id, org_id)
+SELECT 'a1000000-0000-0000-0000-000000000003', r.id, '90000000-0000-0000-0000-000000000001'
+FROM roles r
+WHERE r.name = 'Tester' AND r.org_id IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO user_roles (user_id, role_id, org_id)
+SELECT 'a1000000-0000-0000-0000-000000000004', r.id, '90000000-0000-0000-0000-000000000001'
+FROM roles r
+WHERE r.name = 'Developer' AND r.org_id IS NULL
 ON CONFLICT DO NOTHING;
 
 -- Projects

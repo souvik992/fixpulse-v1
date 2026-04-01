@@ -6,7 +6,8 @@
       "mcp__Neon__get_database_tables",
       "mcp__Neon__run_sql_transaction",
       "mcp__Neon__run_sql",
-      "Bash(neonctl projects:*)"
+      "Bash(neonctl projects:*)",
+      "Bash(npm install:*)"
     ]
   }
 }

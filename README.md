@@ -9,7 +9,7 @@ It supports company workspaces, JWT authentication, role-based team management, 
 - Company registration and login
 - Multi-tenant organization isolation
 - JWT-based authentication
-- Admin, developer, and QA roles
+- RBAC with system roles, custom roles, and project-level assignments
 - Team member invite, update, removal, and password reset flows
 - Project creation and deletion
 - Issue creation, editing, filtering, and deletion
@@ -116,9 +116,11 @@ http://localhost:3000
 
 ## Roles
 
-- `admin`: can manage company settings, members, and passwords
-- `developer`: can work with issues and projects
-- `qa`: can work with issues and projects
+- `admin`: full system access
+- `project_manager`: project-level control
+- `developer`: work on assigned issues
+- `tester`: create and verify bugs
+- `viewer`: read-only access
 
 ## Main API Endpoints
 
@@ -165,6 +167,21 @@ http://localhost:3000
 
 - `GET /api/stats`
 
+### RBAC
+
+- `GET /api/rbac/permissions`
+- `GET /api/rbac/roles`
+- `POST /api/rbac/roles`
+- `PUT /api/rbac/roles/:id/permissions`
+- `POST /api/rbac/roles/:id/permissions`
+- `DELETE /api/rbac/roles/:id/permissions/:permission`
+- `DELETE /api/rbac/roles/:id`
+- `GET /api/rbac/users/:userId/roles`
+- `POST /api/rbac/users/:userId/roles`
+- `DELETE /api/rbac/users/:userId/roles/:userRoleId`
+- `GET /api/rbac/me/permissions`
+- `GET /api/rbac/users/:userId/permissions`
+
 ## Frontend Views
 
 - Authentication screen
@@ -184,7 +201,7 @@ http://localhost:3000
 
 ## Future Improvements
 
-- Add automated tests
+- Expand the automated RBAC and API test coverage
 - Add build tooling for the frontend
 - Add pagination and server-side sorting
 - Add richer audit logging

@@ -29,8 +29,9 @@ const typeIcon     = t => ({ Bug:'🐛', Feature:'✨', Task:'📋', Improvement
 const statusIcon   = s => ({ 'To Do':'○', 'In Progress':'◑', 'In Review':'◕', 'Done':'●' }[s]||'○');
 const timeAgo      = ts => { const d=Math.floor((Date.now()-new Date(ts))/1000); if(d<60)return 'just now'; if(d<3600)return `${Math.floor(d/60)}m ago`; if(d<86400)return `${Math.floor(d/3600)}h ago`; return `${Math.floor(d/86400)}d ago`; };
 const COLORS       = ['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
-const ROLE_LABELS  = { admin:'Admin', developer:'Developer', qa:'QA' };
-const ROLE_COLORS  = { admin:'#ef4444', developer:'#6366f1', qa:'#10b981' };
+const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', tester:'Tester', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Tester':'Tester', 'Viewer':'Viewer' };
+const ROLE_COLORS  = { admin:'#ef4444', project_manager:'#f97316', developer:'#6366f1', tester:'#10b981', viewer:'#9ca3af', qa:'#10b981', 'Admin':'#ef4444', 'Project Manager':'#f97316', 'Developer':'#6366f1', 'Tester':'#10b981', 'Viewer':'#9ca3af' };
+const ALL_PERMISSIONS = ['CREATE_ISSUE','EDIT_ISSUE','DELETE_ISSUE','ASSIGN_ISSUE','CHANGE_STATUS','COMMENT','VIEW_ISSUE','VIEW_REPORTS','MANAGE_PROJECT','MANAGE_USERS','CONFIGURE_WORKFLOW'];
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
 function Toast({ toasts, dismiss }) {
@@ -68,8 +69,9 @@ function Modal({ children, onClose, large }) {
 //  AUTH PAGE  (Login / Register Company)
 // ══════════════════════════════════════════════════════════════════════════════
 function AuthPage({ onAuth }) {
-  const [mode, setMode]       = useState('landing'); // 'landing' | 'login' | 'register'
-  const [form, setForm]       = useState({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1' });
+  const initialToken = new URLSearchParams(window.location.search).get('reset_token') || '';
+  const [mode, setMode]       = useState(initialToken ? 'reset-password' : 'landing'); // 'landing' | 'login' | 'register' | 'forgot-password' | 'reset-password' | 'reset-done'
+  const [form, setForm]       = useState({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1', resetToken: initialToken });
   const [error, setError]     = useState('');
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw]   = useState(false);
@@ -79,6 +81,34 @@ function AuthPage({ onAuth }) {
   const submit = async e => {
     e.preventDefault();
     setError('');
+
+    if (mode === 'forgot-password') {
+      if (!form.email) return setError('Email is required');
+      setLoading(true);
+      try {
+        await fetch('/api/auth/forgot-password', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email: form.email }) });
+        setMode('forgot-sent');
+      } catch { setError('Cannot connect to server.'); }
+      setLoading(false);
+      return;
+    }
+
+    if (mode === 'reset-password') {
+      if (form.password.length < 6) return setError('Password must be at least 6 characters');
+      if (form.password !== form.confirm) return setError('Passwords do not match');
+      setLoading(true);
+      try {
+        const res  = await fetch('/api/auth/reset-password', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token: form.resetToken, password: form.password }) });
+        const data = await res.json();
+        if (!res.ok) { setError(data.error || 'Something went wrong'); setLoading(false); return; }
+        // Clear token from URL
+        window.history.replaceState({}, '', '/');
+        setMode('reset-done');
+      } catch { setError('Cannot connect to server.'); }
+      setLoading(false);
+      return;
+    }
+
     if (mode === 'register') {
       if (!form.companyName.trim()) return setError('Company name is required');
       if (!form.name.trim())        return setError('Your name is required');
@@ -100,7 +130,7 @@ function AuthPage({ onAuth }) {
     setLoading(false);
   };
 
-  const reset = m => { setMode(m); setError(''); setForm({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1' }); };
+  const reset = m => { setMode(m); setError(''); setForm({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1', resetToken:'' }); };
 
   // ── Landing ──
   if (mode === 'landing') return (
@@ -191,10 +221,97 @@ function AuthPage({ onAuth }) {
               <span>Already have a workspace? <span style={{ color:'var(--primary)', cursor:'pointer', fontWeight:600 }} onClick={()=>reset('login')}>Log in →</span></span>
             )}
           </div>
+          {mode === 'login' && (
+            <div style={{ textAlign:'center', marginTop:8 }}>
+              <span style={{ color:'var(--primary)', fontSize:12, cursor:'pointer', fontWeight:500 }} onClick={()=>reset('forgot-password')}>Forgot your password?</span>
+            </div>
+          )}
           <div style={{ textAlign:'center', marginTop:8 }}>
             <span style={{ color:'var(--muted)', fontSize:12, cursor:'pointer' }} onClick={()=>reset('landing')}>← Back</span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+
+  // ── Forgot password ──
+  if (mode === 'forgot-password') return (
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <div style={{ width:'100%', maxWidth:420 }}>
+        <div style={{ textAlign:'center', marginBottom:28 }}>
+          <div style={{ width:48, height:48, background:'var(--primary)', borderRadius:12, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:800, color:'#fff', marginBottom:10 }}>BT</div>
+          <h1 style={{ fontSize:20, fontWeight:700 }}>Forgot Password</h1>
+          <p style={{ color:'var(--muted)', fontSize:13, marginTop:4 }}>Enter your email and we'll send you a reset link</p>
+        </div>
+        <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:28 }}>
+          <form onSubmit={submit}>
+            <div className="form-group">
+              <label className="form-label">Work Email *</label>
+              <input className="form-input" type="email" value={form.email} onChange={e=>set('email',e.target.value)} placeholder="you@company.com" required autoFocus />
+            </div>
+            {error && <div style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', borderRadius:8, padding:'10px 14px', color:'#ef4444', fontSize:13, marginBottom:16 }}>⚠ {error}</div>}
+            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width:'100%', justifyContent:'center', padding:'11px 0', fontSize:14 }}>
+              {loading ? '⏳ Sending…' : '📧 Send Reset Link'}
+            </button>
+          </form>
+          <div style={{ textAlign:'center', marginTop:12 }}>
+            <span style={{ color:'var(--muted)', fontSize:12, cursor:'pointer' }} onClick={()=>reset('login')}>← Back to Login</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Forgot sent confirmation ──
+  if (mode === 'forgot-sent') return (
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <div style={{ width:'100%', maxWidth:420, textAlign:'center' }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>📧</div>
+        <h1 style={{ fontSize:22, fontWeight:700, marginBottom:8 }}>Check your email</h1>
+        <p style={{ color:'var(--muted)', fontSize:14, marginBottom:24 }}>If an account exists for that email, we've sent a password reset link. It expires in 1 hour.</p>
+        <button className="btn btn-primary" style={{ justifyContent:'center', padding:'11px 24px' }} onClick={()=>reset('login')}>Back to Login</button>
+      </div>
+    </div>
+  );
+
+  // ── Reset password ──
+  if (mode === 'reset-password') return (
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <div style={{ width:'100%', maxWidth:420 }}>
+        <div style={{ textAlign:'center', marginBottom:28 }}>
+          <div style={{ width:48, height:48, background:'var(--primary)', borderRadius:12, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:800, color:'#fff', marginBottom:10 }}>BT</div>
+          <h1 style={{ fontSize:20, fontWeight:700 }}>Set New Password</h1>
+          <p style={{ color:'var(--muted)', fontSize:13, marginTop:4 }}>Choose a strong password for your account</p>
+        </div>
+        <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:28 }}>
+          <form onSubmit={submit}>
+            <div className="form-group" style={{ position:'relative' }}>
+              <label className="form-label">New Password *</label>
+              <input className="form-input" type={showPw?'text':'password'} value={form.password} onChange={e=>set('password',e.target.value)} placeholder="Min. 6 characters" required autoFocus style={{ paddingRight:40 }} />
+              <button type="button" onClick={()=>setShowPw(v=>!v)} style={{ position:'absolute', right:10, top:30, background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16 }}>{showPw?'🙈':'👁'}</button>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Confirm Password *</label>
+              <input className="form-input" type={showPw?'text':'password'} value={form.confirm} onChange={e=>set('confirm',e.target.value)} placeholder="Repeat password" required />
+            </div>
+            {error && <div style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', borderRadius:8, padding:'10px 14px', color:'#ef4444', fontSize:13, marginBottom:16 }}>⚠ {error}</div>}
+            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width:'100%', justifyContent:'center', padding:'11px 0', fontSize:14 }}>
+              {loading ? '⏳ Saving…' : '🔒 Set New Password'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Reset done ──
+  if (mode === 'reset-done') return (
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <div style={{ width:'100%', maxWidth:420, textAlign:'center' }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>✅</div>
+        <h1 style={{ fontSize:22, fontWeight:700, marginBottom:8 }}>Password updated!</h1>
+        <p style={{ color:'var(--muted)', fontSize:14, marginBottom:24 }}>Your password has been changed. You can now log in with your new password.</p>
+        <button className="btn btn-primary" style={{ justifyContent:'center', padding:'11px 24px' }} onClick={()=>reset('login')}>Go to Login</button>
       </div>
     </div>
   );
@@ -498,7 +615,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
     navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   };
 
-  const roleOrder = { admin:0, developer:1, qa:2 };
+  const roleOrder = { admin:0, project_manager:1, developer:2, tester:3, qa:3, viewer:4 };
   const sorted = [...users].sort((a,b) => (roleOrder[a.role]||9) - (roleOrder[b.role]||9));
 
   return (
@@ -506,7 +623,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
       <div className="page-header">
         <div>
           <h1>Team Members</h1>
-          <p>{users.length} member{users.length!==1?'s':''} · {users.filter(u=>u.role==='admin').length} admin · {users.filter(u=>u.role==='developer').length} developer · {users.filter(u=>u.role==='qa').length} QA</p>
+          <p>{users.length} member{users.length!==1?'s':''} · {users.filter(u=>u.role==='admin').length} admin · {users.filter(u=>u.role==='project_manager').length} project manager · {users.filter(u=>u.role==='developer').length} developer · {users.filter(u=>u.role==='tester' || u.role==='qa').length} tester · {users.filter(u=>u.role==='viewer').length} viewer</p>
         </div>
         {isAdmin && <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Member</button>}
       </div>
@@ -545,8 +662,10 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
                 <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                   <select className="form-select" style={{flex:1,fontSize:12,padding:'5px 8px'}} value={u.role} onChange={e=>changeRole(u.id,e.target.value)}>
                     <option value="admin">Admin</option>
+                    <option value="project_manager">Project Manager</option>
                     <option value="developer">Developer</option>
-                    <option value="qa">QA</option>
+                    <option value="tester">Tester</option>
+                    <option value="viewer">Viewer</option>
                   </select>
                   <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>setResetTarget(u)}>🔑 Reset PW</button>
                   <button className="btn btn-danger btn-sm" style={{fontSize:11}} onClick={()=>removeMember(u.id)}>Remove</button>
@@ -568,8 +687,10 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
               <div className="form-group">
                 <label className="form-label">Role *</label>
                 <select className="form-select" value={form.role} onChange={e=>setF('role',e.target.value)}>
+                  <option value="project_manager">Project Manager</option>
                   <option value="developer">Developer</option>
-                  <option value="qa">QA</option>
+                  <option value="tester">Tester</option>
+                  <option value="viewer">Viewer</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
@@ -698,6 +819,217 @@ function SettingsPage({ org, setOrg, currentUser, toast }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+//  ROLES PAGE  (admin only – RBAC management)
+// ══════════════════════════════════════════════════════════════════════════════
+function RolesPage({ users, currentUser, toast }) {
+  const [roles, setRoles]           = useState([]);
+  const [selRole, setSelRole]       = useState(null);
+  const [selUser, setSelUser]       = useState(null);
+  const [userRoles, setUserRoles]   = useState([]);
+  const [projects, setProjects]     = useState([]);
+  const [showNew, setShowNew]       = useState(false);
+  const [newRole, setNewRole]       = useState({ name:'', description:'', color:'#6366f1', permissions:[] });
+  const [assignForm, setAssignForm] = useState({ userId:'', roleId:'', projectId:'' });
+  const canManage = currentUser?.role === 'admin';
+
+  const loadRoles = () => api.get('/api/rbac/roles').then(setRoles);
+  const loadProjects = () => api.get('/api/projects').then(setProjects);
+
+  useEffect(() => { loadRoles(); loadProjects(); }, []);
+
+  const loadUserRoles = async uid => {
+    const res = await api.get(`/api/rbac/users/${uid}/roles`);
+    if (!res.error) setUserRoles(res);
+  };
+
+  const selectUser = u => { setSelUser(u); loadUserRoles(u.id); };
+
+  const assignRole = async e => {
+    e.preventDefault();
+    if (!assignForm.userId || !assignForm.roleId) return;
+    const body = { roleId: assignForm.roleId };
+    if (assignForm.projectId) body.projectId = assignForm.projectId;
+    const res = await api.post(`/api/rbac/users/${assignForm.userId}/roles`, body);
+    if (res.error) { toast(res.error, 'error'); return; }
+    toast('Role assigned', 'success');
+    if (selUser?.id === assignForm.userId) loadUserRoles(assignForm.userId);
+    setAssignForm({ userId: assignForm.userId, roleId:'', projectId:'' });
+  };
+
+  const removeUserRole = async (uid, urId) => {
+    await api.delete(`/api/rbac/users/${uid}/roles/${urId}`);
+    toast('Role removed', 'info');
+    loadUserRoles(uid);
+  };
+
+  const createRole = async e => {
+    e.preventDefault();
+    if (!newRole.name.trim()) return;
+    const res = await api.post('/api/rbac/roles', newRole);
+    if (res.error) { toast(res.error, 'error'); return; }
+    toast('Role created', 'success');
+    setShowNew(false);
+    setNewRole({ name:'', description:'', color:'#6366f1', permissions:[] });
+    loadRoles();
+  };
+
+  const deleteRole = async id => {
+    if (!confirm('Delete this role?')) return;
+    await api.delete(`/api/rbac/roles/${id}`);
+    toast('Role deleted', 'info');
+    if (selRole?.id === id) setSelRole(null);
+    loadRoles();
+  };
+
+  const togglePerm = (perm, list, setter) => {
+    setter(l => l.includes(perm) ? l.filter(p=>p!==perm) : [...l, perm]);
+  };
+
+  const permBadge = (perm, active, onClick) => (
+    <span key={perm} onClick={onClick} style={{
+      display:'inline-block', padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600,
+      cursor: onClick ? 'pointer' : 'default', margin:'3px 4px 3px 0',
+      background: active ? 'var(--primary)' : 'var(--surface2)',
+      color: active ? '#fff' : 'var(--muted)',
+      border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
+      userSelect:'none',
+    }}>{perm}</span>
+  );
+
+  if (!canManage) return (
+    <div className="empty-state"><div className="icon">🔒</div><h3>Admin Only</h3><p>Only admins can manage roles & permissions.</p></div>
+  );
+
+  return (
+    <div>
+      <div className="page-header">
+        <div><h1>Roles & Permissions</h1><p>Manage RBAC roles and user assignments</p></div>
+        <button className="btn btn-primary" onClick={()=>setShowNew(true)}>+ New Role</button>
+      </div>
+
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:20}}>
+
+        {/* ── Left: Role list ── */}
+        <div>
+          <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',marginBottom:12,textTransform:'uppercase',letterSpacing:'.05em'}}>All Roles</h3>
+          {roles.map(r => (
+            <div key={r.id} onClick={()=>setSelRole(selRole?.id===r.id?null:r)}
+              style={{background:'var(--surface)',border:`1px solid ${selRole?.id===r.id?'var(--primary)':'var(--border)'}`,borderRadius:'var(--radius)',padding:16,marginBottom:10,cursor:'pointer',transition:'border .15s'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                <span style={{width:10,height:10,borderRadius:'50%',background:r.color,flexShrink:0,display:'inline-block'}}/>
+                <span style={{fontWeight:600,flex:1}}>{r.name}</span>
+                {r.isSystem && <span style={{fontSize:10,padding:'1px 7px',borderRadius:99,background:'var(--surface2)',color:'var(--muted)',border:'1px solid var(--border)'}}>system</span>}
+                {!r.isSystem && canManage && (
+                  <button className="btn-icon" style={{fontSize:12,color:'var(--danger)'}} onClick={e=>{e.stopPropagation();deleteRole(r.id);}}>✕</button>
+                )}
+              </div>
+              {r.description && <p style={{fontSize:12,color:'var(--muted)',margin:'0 0 8px'}}>{r.description}</p>}
+              <div style={{display:'flex',flexWrap:'wrap'}}>
+                {(r.permissions||[]).map(p => permBadge(p, true, null))}
+                {(!r.permissions||r.permissions.length===0) && <span style={{fontSize:12,color:'var(--muted)'}}>No permissions</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Right: User assignment panel ── */}
+        <div>
+          <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',marginBottom:12,textTransform:'uppercase',letterSpacing:'.05em'}}>Assign Roles to Users</h3>
+
+          {/* User picker */}
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16,marginBottom:12}}>
+            <label className="form-label">Select User</label>
+            <select className="form-select" value={assignForm.userId} onChange={e=>{setAssignForm(f=>({...f,userId:e.target.value,roleId:'',projectId:''}));const u=users.find(u=>u.id===e.target.value);if(u)selectUser(u);}}>
+              <option value="">— pick a user —</option>
+              {users.map(u=><option key={u.id} value={u.id}>{u.name} ({u.email})</option>)}
+            </select>
+          </div>
+
+          {/* Current roles for selected user */}
+          {selUser && (
+            <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16,marginBottom:12}}>
+              <div style={{fontWeight:600,fontSize:13,marginBottom:10}}>
+                <div className="avatar" style={{width:24,height:24,fontSize:11,background:selUser.color,display:'inline-flex',verticalAlign:'middle',marginRight:8}}>{selUser.avatar}</div>
+                {selUser.name}'s Roles
+              </div>
+              {userRoles.length === 0 && <p style={{fontSize:12,color:'var(--muted)'}}>No roles assigned.</p>}
+              {userRoles.map(ur => (
+                <div key={ur.id} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                  <span style={{flex:1,fontSize:13}}>
+                    <span style={{fontWeight:600,color: ROLE_COLORS[ur.name]||'var(--primary)'}}>{ur.name}</span>
+                    {ur.projectName && <span style={{color:'var(--muted)',fontSize:12}}> · {ur.projectName}</span>}
+                    {!ur.projectName && <span style={{color:'var(--muted)',fontSize:12}}> · Global</span>}
+                  </span>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:11,padding:'2px 8px',color:'var(--danger)'}} onClick={()=>removeUserRole(selUser.id,ur.id)}>Remove</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Assign form */}
+          {selUser && (
+            <form onSubmit={assignRole} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16}}>
+              <div style={{fontWeight:600,fontSize:13,marginBottom:12}}>Assign New Role</div>
+              <div className="form-group">
+                <label className="form-label">Role</label>
+                <select className="form-select" value={assignForm.roleId} onChange={e=>setAssignForm(f=>({...f,roleId:e.target.value}))} required>
+                  <option value="">— select role —</option>
+                  {roles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Project (optional — leave blank for global)</label>
+                <select className="form-select" value={assignForm.projectId} onChange={e=>setAssignForm(f=>({...f,projectId:e.target.value}))}>
+                  <option value="">Global (all projects)</option>
+                  {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <button type="submit" className="btn btn-primary btn-sm">Assign Role</button>
+            </form>
+          )}
+        </div>
+      </div>
+
+      {/* ── New role modal ── */}
+      {showNew && (
+        <Modal onClose={()=>setShowNew(false)}>
+          <div className="modal-header"><h2 className="modal-title">Create Custom Role</h2><button className="btn-icon" onClick={()=>setShowNew(false)}>✕</button></div>
+          <form onSubmit={createRole}>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Role Name *</label>
+                <input className="form-input" value={newRole.name} onChange={e=>setNewRole(r=>({...r,name:e.target.value}))} placeholder="e.g. QA Lead" required autoFocus/>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <input className="form-input" value={newRole.description} onChange={e=>setNewRole(r=>({...r,description:e.target.value}))} placeholder="What can this role do?"/>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Color</label>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  {COLORS.map(c=><div key={c} onClick={()=>setNewRole(r=>({...r,color:c}))} style={{width:24,height:24,borderRadius:'50%',background:c,cursor:'pointer',border:newRole.color===c?'3px solid #fff':'3px solid transparent',transform:newRole.color===c?'scale(1.2)':'none',transition:'all .15s'}}/>)}
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Permissions</label>
+                <div style={{display:'flex',flexWrap:'wrap',gap:2,marginTop:4}}>
+                  {ALL_PERMISSIONS.map(p => permBadge(p, newRole.permissions.includes(p), ()=>togglePerm(p, newRole.permissions, perms=>setNewRole(r=>({...r,permissions:perms})))))}
+                </div>
+                <p style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Click permissions to toggle them on/off</p>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowNew(false)}>Cancel</button>
+              <button type="submit" className="btn btn-primary">Create Role</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  MAIN APP
 // ══════════════════════════════════════════════════════════════════════════════
 function App() {
@@ -711,7 +1043,7 @@ function App() {
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [showSidebarProjectCreate, setShowSidebarProjectCreate] = useState(false);
   const [toasts, setToasts]         = useState([]);
-  const [theme, setTheme]           = useState(() => localStorage.getItem('bt_theme') || 'dark');
+  const [theme, setTheme]           = useState(() => localStorage.getItem('bt_theme') || 'light');
 
   // Apply theme to <html> whenever it changes
   useEffect(() => {

@@ -5,6 +5,10 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
+const { sendAssigneeNotification, sendPasswordResetEmail } = require('./utils/email');
+const { randomUUID } = require('crypto');
+const { PERMISSIONS } = require('./rbac/permissions');
+const { checkPermission, assignSystemRole, getUserPermissions, LEGACY_TO_RBAC } = require('./rbac/middleware');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -49,12 +53,83 @@ function auth(req, res, next) {
   }
 }
 
-function adminOnly(req, res, next) {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-  next();
+async function getBugContext(bugId, orgId) {
+  const { rows } = await db.query(
+    'SELECT id, project_id, assignee_id, status FROM bugs WHERE id=$1 AND org_id=$2',
+    [bugId, orgId]
+  );
+  return rows[0] || null;
 }
+
+async function getProjectContext(projectId, orgId) {
+  const { rows } = await db.query(
+    'SELECT id, key, name FROM projects WHERE id=$1 AND org_id=$2',
+    [projectId, orgId]
+  );
+  return rows[0] || null;
+}
+
+async function getScopedPermissions(req, projectId = null) {
+  const perms = await getUserPermissions(req.user.id, req.user.orgId, projectId);
+  req.userPermissions = perms;
+  return perms;
+}
+
+async function getAssignableRole(roleId, orgId) {
+  const { rows } = await db.query(
+    'SELECT * FROM roles WHERE id=$1 AND (org_id=$2 OR (is_system=true AND org_id IS NULL))',
+    [roleId, orgId]
+  );
+  return rows[0] || null;
+}
+
+async function assertUserInOrg(userId, orgId) {
+  const { rows } = await db.query('SELECT id FROM users WHERE id=$1 AND org_id=$2', [userId, orgId]);
+  return rows.length > 0;
+}
+
+function denyMissingPermission(res, permission) {
+  return res.status(403).json({
+    error: `Forbidden - ${permission} permission required`,
+    required: permission,
+  });
+}
+
+async function enforceIssueWritePermissions(req, bug, changes) {
+  const perms = await getScopedPermissions(req, bug.project_id);
+
+  if (!perms.has(PERMISSIONS.MANAGE_PROJECT) && bug.assignee_id !== req.user.id) {
+    return { status: 403, body: { error: 'You can only modify issues assigned to you' } };
+  }
+
+  const required = new Set();
+  const editableFields = ['title', 'description', 'type', 'priority', 'labels'];
+
+  if (editableFields.some((field) => changes[field] !== undefined)) {
+    required.add(PERMISSIONS.EDIT_ISSUE);
+  }
+  if (changes.status !== undefined && String(changes.status) !== String(bug.status)) {
+    required.add(PERMISSIONS.CHANGE_STATUS);
+  }
+  if (changes.assigneeId !== undefined || changes.assignee_id !== undefined) {
+    required.add(PERMISSIONS.ASSIGN_ISSUE);
+  }
+
+  for (const permission of required) {
+    if (!perms.has(permission)) {
+      return {
+        status: 403,
+        body: {
+          error: `Forbidden - ${permission} permission required`,
+          required: permission,
+        },
+      };
+    }
+  }
+
+  return { perms };
+}
+
 
 app.post('/api/auth/register-company', async (req, res) => {
   try {
@@ -93,6 +168,7 @@ app.post('/api/auth/register-company', async (req, res) => {
       "INSERT INTO users (org_id,name,email,avatar,color,password_hash,role) VALUES ($1,$2,$3,$4,$5,$6,'admin') RETURNING *",
       [org.id, name, email, avatar, color, hash]
     );
+    await assignSystemRole(user.id, 'Admin', org.id);
 
     const token = jwt.sign(
       { id: user.id, orgId: org.id, email: user.email, name: user.name, role: 'admin' },
@@ -165,6 +241,57 @@ app.get('/api/auth/me', auth, async (req, res) => {
 
 app.post('/api/auth/logout', (_, res) => res.json({ success: true }));
 
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const { rows } = await db.query('SELECT id, name, email FROM users WHERE email=$1', [email]);
+    // Always respond OK to prevent email enumeration
+    if (!rows.length) return res.json({ success: true });
+
+    const user  = rows[0];
+    const token = randomUUID().replace(/-/g, '');
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await db.query('DELETE FROM password_reset_tokens WHERE user_id=$1', [user.id]);
+    await db.query(
+      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1,$2,$3)',
+      [user.id, token, expires]
+    );
+
+    const appUrl  = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+    const resetUrl = `${appUrl}?reset_token=${token}`;
+
+    await sendPasswordResetEmail({ toEmail: user.email, toName: user.name, resetUrl });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and password are required' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    const { rows } = await db.query(
+      'SELECT * FROM password_reset_tokens WHERE token=$1 AND expires_at > NOW()',
+      [token]
+    );
+    if (!rows.length) return res.status(400).json({ error: 'Reset link is invalid or has expired' });
+
+    const hash = await bcrypt.hash(password, 10);
+    await db.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, rows[0].user_id]);
+    await db.query('DELETE FROM password_reset_tokens WHERE token=$1', [token]);
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/org', auth, async (req, res) => {
   try {
     const { rows } = await db.query('SELECT * FROM organizations WHERE id=$1', [req.user.orgId]);
@@ -174,7 +301,7 @@ app.get('/api/org', auth, async (req, res) => {
   }
 });
 
-app.put('/api/org', auth, adminOnly, async (req, res) => {
+app.put('/api/org', auth, checkPermission(PERMISSIONS.CONFIGURE_WORKFLOW), async (req, res) => {
   try {
     const { name, color } = req.body;
     const { rows } = await db.query(
@@ -198,11 +325,15 @@ app.get('/api/members', auth, async (req, res) => {
   }
 });
 
-app.post('/api/members', auth, adminOnly, async (req, res) => {
+app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
     const { name, email, role = 'developer', color = '#6366f1', password } = req.body;
+    const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'tester', 'viewer', 'qa']);
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email required' });
+    }
+    if (!allowedRoles.has(role)) {
+      return res.status(400).json({ error: 'Unsupported role' });
     }
 
     const tempPassword = password || 'Welcome@123';
@@ -219,15 +350,23 @@ app.post('/api/members', auth, adminOnly, async (req, res) => {
       [req.user.orgId, name, email, avatar, color, hash, role]
     );
 
+    // Sync RBAC: assign matching system role
+    const rbacRole = LEGACY_TO_RBAC[role];
+    if (rbacRole) await assignSystemRole(rows[0].id, rbacRole, req.user.orgId);
+
     res.status(201).json({ ...strip(camel(rows[0])), tempPassword });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.put('/api/members/:id', auth, adminOnly, async (req, res) => {
+app.put('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
     const { name, role, color } = req.body;
+    const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'tester', 'viewer', 'qa']);
+    if (role && !allowedRoles.has(role)) {
+      return res.status(400).json({ error: 'Unsupported role' });
+    }
     const { rows } = await db.query(
       'UPDATE users SET name=COALESCE($1,name),role=COALESCE($2,role),color=COALESCE($3,color) WHERE id=$4 AND org_id=$5 RETURNING *',
       [name, role, color, req.params.id, req.user.orgId]
@@ -237,13 +376,29 @@ app.put('/api/members/:id', auth, adminOnly, async (req, res) => {
       return res.status(404).json({ error: 'Not found' });
     }
 
+    // Sync RBAC: if role changed, replace global system role assignment
+    if (role) {
+      const rbacRole = LEGACY_TO_RBAC[role];
+      if (rbacRole) {
+        // Remove all existing system global roles for this user in this org
+        await db.query(
+          `DELETE FROM user_roles ur
+           USING roles r
+           WHERE ur.role_id = r.id AND ur.user_id=$1 AND ur.org_id=$2
+             AND r.is_system=true AND ur.project_id IS NULL`,
+          [req.params.id, req.user.orgId]
+        );
+        await assignSystemRole(req.params.id, rbacRole, req.user.orgId);
+      }
+    }
+
     res.json(strip(camel(rows[0])));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.delete('/api/members/:id', auth, adminOnly, async (req, res) => {
+app.delete('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
     if (req.params.id === req.user.id) {
       return res.status(400).json({ error: "You can't remove yourself" });
@@ -256,7 +411,7 @@ app.delete('/api/members/:id', auth, adminOnly, async (req, res) => {
   }
 });
 
-app.post('/api/members/:id/reset-password', auth, adminOnly, async (req, res) => {
+app.post('/api/members/:id/reset-password', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
     const tempPassword = req.body.password || 'Welcome@123';
     const hash = await bcrypt.hash(tempPassword, 10);
@@ -284,7 +439,7 @@ app.get('/api/projects', auth, async (req, res) => {
   }
 });
 
-app.post('/api/projects', auth, async (req, res) => {
+app.post('/api/projects', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), async (req, res) => {
   try {
     const { name, key, description = '', color = '#6366f1' } = req.body;
     const { rows } = await db.query(
@@ -304,7 +459,7 @@ app.post('/api/projects', auth, async (req, res) => {
   }
 });
 
-app.delete('/api/projects/:id', auth, async (req, res) => {
+app.delete('/api/projects/:id', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), async (req, res) => {
   try {
     await db.query('DELETE FROM projects WHERE id=$1 AND org_id=$2', [req.params.id, req.user.orgId]);
     res.json({ success: true });
@@ -313,7 +468,7 @@ app.delete('/api/projects/:id', auth, async (req, res) => {
   }
 });
 
-app.get('/api/bugs', auth, async (req, res) => {
+app.get('/api/bugs', auth, checkPermission(PERMISSIONS.VIEW_ISSUE), async (req, res) => {
   try {
     const { projectId, status, priority, type, assigneeId, search } = req.query;
     const conditions = ['org_id=$1'];
@@ -356,7 +511,12 @@ app.get('/api/bugs', auth, async (req, res) => {
   }
 });
 
-app.get('/api/bugs/:id', auth, async (req, res) => {
+app.get('/api/bugs/:id', auth, checkPermission(PERMISSIONS.VIEW_ISSUE, {
+  projectId: async (req) => {
+    const bug = await getBugContext(req.params.id, req.user.orgId);
+    return bug?.project_id || null;
+  },
+}), async (req, res) => {
   try {
     const { rows } = await db.query('SELECT * FROM bugs WHERE id=$1 AND org_id=$2', [
       req.params.id,
@@ -381,7 +541,9 @@ app.get('/api/bugs/:id', auth, async (req, res) => {
   }
 });
 
-app.post('/api/bugs', auth, async (req, res) => {
+app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
+  projectId: (req) => req.body.projectId,
+}), async (req, res) => {
   try {
     const {
       projectId,
@@ -394,18 +556,27 @@ app.post('/api/bugs', auth, async (req, res) => {
     } = req.body;
     const reporterId = req.user.id;
 
+    const project = await getProjectContext(projectId, req.user.orgId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const perms = await getScopedPermissions(req, projectId);
+    if (assigneeId && !perms.has(PERMISSIONS.ASSIGN_ISSUE)) {
+      return denyMissingPermission(res, PERMISSIONS.ASSIGN_ISSUE);
+    }
+
     const sequence = await db.query(
       'UPDATE project_sequences SET next_num=next_num+1 WHERE project_id=$1 RETURNING next_num-1 AS num',
       [projectId]
     );
     const number = sequence.rows[0]?.num ?? 1;
-    const project = await db.query('SELECT key FROM projects WHERE id=$1', [projectId]);
 
     const { rows } = await db.query(
       'INSERT INTO bugs (org_id,key,project_id,title,description,type,priority,assignee_id,reporter_id,labels) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
       [
         req.user.orgId,
-        `${project.rows[0].key}-${number}`,
+        `${project.key}-${number}`,
         projectId,
         title,
         description,
@@ -426,6 +597,22 @@ app.post('/api/bugs', auth, async (req, res) => {
     bug.comments = [];
     bug.activity = [{ type: 'created', note: 'Issue created' }];
     res.status(201).json(bug);
+
+    // Send email notification to assignee (non-blocking)
+    if (assigneeId) {
+      db.query('SELECT name, email FROM users WHERE id=$1', [assigneeId])
+        .then(({ rows }) => {
+          if (!rows.length) return;
+          return sendAssigneeNotification({
+            assigneeEmail: rows[0].email,
+            assigneeName:  rows[0].name,
+            reporterName:  req.user.name,
+            bug,
+            appUrl: process.env.APP_URL,
+          });
+        })
+        .catch((err) => console.warn('Email notification failed:', err.message));
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -433,14 +620,20 @@ app.post('/api/bugs', auth, async (req, res) => {
 
 app.put('/api/bugs/:id', auth, async (req, res) => {
   try {
+    const bugContext = await getBugContext(req.params.id, req.user.orgId);
+    if (!bugContext) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const permissionCheck = await enforceIssueWritePermissions(req, bugContext, req.body);
+    if (permissionCheck.status) {
+      return res.status(permissionCheck.status).json(permissionCheck.body);
+    }
+
     const { rows: previousRows } = await db.query('SELECT * FROM bugs WHERE id=$1 AND org_id=$2', [
       req.params.id,
       req.user.orgId,
     ]);
-
-    if (!previousRows.length) {
-      return res.status(404).json({ error: 'Not found' });
-    }
 
     const fieldMap = { assigneeId: 'assignee_id' };
     const sets = [];
@@ -489,7 +682,12 @@ app.put('/api/bugs/:id', auth, async (req, res) => {
   }
 });
 
-app.delete('/api/bugs/:id', auth, async (req, res) => {
+app.delete('/api/bugs/:id', auth, checkPermission(PERMISSIONS.DELETE_ISSUE, {
+  projectId: async (req) => {
+    const bug = await getBugContext(req.params.id, req.user.orgId);
+    return bug?.project_id || null;
+  },
+}), async (req, res) => {
   try {
     await db.query('DELETE FROM bugs WHERE id=$1 AND org_id=$2', [req.params.id, req.user.orgId]);
     res.json({ success: true });
@@ -498,7 +696,12 @@ app.delete('/api/bugs/:id', auth, async (req, res) => {
   }
 });
 
-app.post('/api/bugs/:id/comments', auth, async (req, res) => {
+app.post('/api/bugs/:id/comments', auth, checkPermission(PERMISSIONS.COMMENT, {
+  projectId: async (req) => {
+    const bug = await getBugContext(req.params.id, req.user.orgId);
+    return bug?.project_id || null;
+  },
+}), async (req, res) => {
   try {
     const { text } = req.body;
     const { rows } = await db.query(
@@ -520,21 +723,44 @@ app.delete('/api/bugs/:id/comments/:cid', auth, async (req, res) => {
   }
 });
 
-app.get('/api/stats', auth, async (req, res) => {
+app.get('/api/stats', auth, checkPermission(PERMISSIONS.VIEW_REPORTS), async (req, res) => {
   try {
     const { projectId } = req.query;
-    const orgFilter = `org_id='${req.user.orgId}'`;
-    const filter = projectId ? `${orgFilter} AND project_id='${projectId}'` : orgFilter;
+    const perms = await getScopedPermissions(req, projectId || null);
+    if (!perms.has(PERMISSIONS.VIEW_REPORTS)) {
+      return denyMissingPermission(res, PERMISSIONS.VIEW_REPORTS);
+    }
+
+    const filters = ['org_id = $1'];
+    const values = [req.user.orgId];
+
+    if (projectId) {
+      filters.push(`project_id = $${values.length + 1}`);
+      values.push(projectId);
+    }
+
+    const where = filters.join(' AND ');
+    const dailyFilters = ['b.org_id = $1'];
+    if (projectId) {
+      dailyFilters.push('b.project_id = $2');
+    }
+    const dailyWhere = dailyFilters.join(' AND ');
 
     const [statusRows, priorityRows, typeRows, totals, daily] = await Promise.all([
-      db.query(`SELECT status,COUNT(*)::int AS cnt FROM bugs WHERE ${filter} GROUP BY status`),
-      db.query(`SELECT priority,COUNT(*)::int AS cnt FROM bugs WHERE ${filter} GROUP BY priority`),
-      db.query(`SELECT type,COUNT(*)::int AS cnt FROM bugs WHERE ${filter} GROUP BY type`),
+      db.query(`SELECT status,COUNT(*)::int AS cnt FROM bugs WHERE ${where} GROUP BY status`, values),
+      db.query(`SELECT priority,COUNT(*)::int AS cnt FROM bugs WHERE ${where} GROUP BY priority`, values),
+      db.query(`SELECT type,COUNT(*)::int AS cnt FROM bugs WHERE ${where} GROUP BY type`, values),
       db.query(
-        `SELECT COUNT(*)::int AS total,COUNT(*) FILTER (WHERE status!='Done')::int AS open_count,COUNT(*) FILTER (WHERE status='Done')::int AS done_count FROM bugs WHERE ${filter}`
+        `SELECT COUNT(*)::int AS total,COUNT(*) FILTER (WHERE status!='Done')::int AS open_count,COUNT(*) FILTER (WHERE status='Done')::int AS done_count FROM bugs WHERE ${where}`,
+        values
       ),
       db.query(
-        `SELECT to_char(d::date,'Mon DD') AS label,COUNT(b.id)::int AS count FROM generate_series(NOW()-INTERVAL '6 days',NOW(),INTERVAL '1 day') d LEFT JOIN bugs b ON b.created_at::date=d::date AND b.${filter} GROUP BY d ORDER BY d`
+        `SELECT to_char(d::date,'Mon DD') AS label,COUNT(b.id)::int AS count
+         FROM generate_series(NOW()-INTERVAL '6 days',NOW(),INTERVAL '1 day') d
+         LEFT JOIN bugs b ON b.created_at::date=d::date AND ${dailyWhere}
+         GROUP BY d
+         ORDER BY d`,
+        values
       ),
     ]);
 
@@ -564,6 +790,232 @@ app.get('/api/stats', auth, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  RBAC API
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/rbac/permissions — all available permission constants
+app.get('/api/rbac/permissions', auth, async (_req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM permissions ORDER BY name');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/rbac/roles — all roles (system + org-specific)
+app.get('/api/rbac/roles', auth, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT r.*, COALESCE(json_agg(p.name) FILTER (WHERE p.name IS NOT NULL), '[]') AS permissions
+       FROM roles r
+       LEFT JOIN role_permissions rp ON rp.role_id = r.id
+       LEFT JOIN permissions p ON p.id = rp.permission_id
+       WHERE r.org_id IS NULL OR r.org_id = $1
+       GROUP BY r.id ORDER BY r.is_system DESC, r.name`,
+      [req.user.orgId]
+    );
+    res.json(rows.map(camel));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/rbac/roles — create a custom org role (admin only)
+app.post('/api/rbac/roles', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    const { name, description = '', color = '#6366f1', permissions: perms = [] } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Role name required' });
+
+    const { rows: permissionRows } = await db.query(
+      'SELECT name FROM permissions WHERE name = ANY($1::text[])',
+      [perms]
+    );
+    if (permissionRows.length !== perms.length) {
+      return res.status(400).json({ error: 'One or more permissions are invalid' });
+    }
+
+    const { rows: [role] } = await db.query(
+      'INSERT INTO roles (org_id,name,description,color,is_system) VALUES ($1,$2,$3,$4,false) RETURNING *',
+      [req.user.orgId, name.trim(), description, color]
+    );
+
+    if (perms.length) {
+      await db.query(
+        `INSERT INTO role_permissions (role_id, permission_id)
+         SELECT $1, id FROM permissions WHERE name = ANY($2::text[])
+         ON CONFLICT DO NOTHING`,
+        [role.id, perms]
+      );
+    }
+    res.status(201).json(camel(role));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/rbac/roles/:id/permissions — replace permission set on a role
+app.put('/api/rbac/roles/:id/permissions', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    const { permissions: perms = [] } = req.body;
+    const role = await getAssignableRole(req.params.id, req.user.orgId);
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+    if (role.is_system) return res.status(403).json({ error: 'Cannot modify system role permissions' });
+
+    const { rows: permissionRows } = await db.query(
+      'SELECT name FROM permissions WHERE name = ANY($1::text[])',
+      [perms]
+    );
+    if (permissionRows.length !== perms.length) {
+      return res.status(400).json({ error: 'One or more permissions are invalid' });
+    }
+
+    await db.query('DELETE FROM role_permissions WHERE role_id=$1', [req.params.id]);
+    if (perms.length) {
+      await db.query(
+        `INSERT INTO role_permissions (role_id, permission_id)
+         SELECT $1, id FROM permissions WHERE name = ANY($2::text[])
+         ON CONFLICT DO NOTHING`,
+        [req.params.id, perms]
+      );
+    }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/rbac/roles/:id/permissions', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    const { permission } = req.body;
+    if (!permission) return res.status(400).json({ error: 'permission required' });
+
+    const role = await getAssignableRole(req.params.id, req.user.orgId);
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+    if (role.is_system) return res.status(403).json({ error: 'Cannot modify system role permissions' });
+
+    const { rows: [permRow] } = await db.query('SELECT id FROM permissions WHERE name=$1', [permission]);
+    if (!permRow) return res.status(404).json({ error: 'Permission not found' });
+
+    await db.query(
+      'INSERT INTO role_permissions (role_id, permission_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+      [req.params.id, permRow.id]
+    );
+    res.status(201).json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/rbac/roles/:id/permissions/:permission', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    const role = await getAssignableRole(req.params.id, req.user.orgId);
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+    if (role.is_system) return res.status(403).json({ error: 'Cannot modify system role permissions' });
+
+    await db.query(
+      `DELETE FROM role_permissions rp
+       USING permissions p
+       WHERE rp.role_id=$1 AND rp.permission_id=p.id AND p.name=$2`,
+      [req.params.id, req.params.permission]
+    );
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/rbac/roles/:id — delete a custom org role
+app.delete('/api/rbac/roles/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    const { rows: [role] } = await db.query('SELECT * FROM roles WHERE id=$1 AND org_id=$2', [req.params.id, req.user.orgId]);
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+    await db.query('DELETE FROM roles WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/rbac/users/:userId/roles — get roles assigned to a user
+app.get('/api/rbac/users/:userId/roles', auth, async (req, res) => {
+  try {
+    const canManage = (await getScopedPermissions(req)).has(PERMISSIONS.MANAGE_USERS);
+    if (!canManage && req.params.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden - MANAGE_USERS permission required' });
+    }
+
+    const { rows } = await db.query(
+      `SELECT ur.id, ur.project_id, r.name, r.color, r.is_system,
+              p.name AS project_name
+       FROM user_roles ur
+       JOIN roles r ON r.id = ur.role_id
+       LEFT JOIN projects p ON p.id = ur.project_id
+       WHERE ur.user_id=$1 AND ur.org_id=$2
+       ORDER BY ur.project_id NULLS FIRST, r.name`,
+      [req.params.userId, req.user.orgId]
+    );
+    res.json(rows.map(camel));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/rbac/users/:userId/roles — assign a role to a user (global or project-level)
+app.post('/api/rbac/users/:userId/roles', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    const { roleId, projectId = null } = req.body;
+    if (!roleId) return res.status(400).json({ error: 'roleId required' });
+
+    const userExists = await assertUserInOrg(req.params.userId, req.user.orgId);
+    if (!userExists) return res.status(404).json({ error: 'User not found' });
+
+    const role = await getAssignableRole(roleId, req.user.orgId);
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+
+    if (projectId) {
+      const project = await getProjectContext(projectId, req.user.orgId);
+      if (!project) return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const col = projectId
+      ? 'INSERT INTO user_roles (user_id,role_id,org_id,project_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *'
+      : 'INSERT INTO user_roles (user_id,role_id,org_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING *';
+    const vals = projectId
+      ? [req.params.userId, roleId, req.user.orgId, projectId]
+      : [req.params.userId, roleId, req.user.orgId];
+
+    const { rows } = await db.query(col, vals);
+    res.status(201).json(rows[0] ? camel(rows[0]) : { message: 'Already assigned' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/rbac/users/:userId/roles/:userRoleId — remove a role from a user
+app.delete('/api/rbac/users/:userId/roles/:userRoleId', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    await db.query(
+      'DELETE FROM user_roles WHERE id=$1 AND user_id=$2 AND org_id=$3',
+      [req.params.userRoleId, req.params.userId, req.user.orgId]
+    );
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/rbac/me/permissions — current user's effective permissions (optionally scoped to project)
+app.get('/api/rbac/me/permissions', auth, async (req, res) => {
+  try {
+    const projectId = req.query.projectId || null;
+    const perms = await getUserPermissions(req.user.id, req.user.orgId, projectId);
+    res.json({ permissions: [...perms] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/rbac/users/:userId/permissions', auth, async (req, res) => {
+  try {
+    const canManage = (await getScopedPermissions(req)).has(PERMISSIONS.MANAGE_USERS);
+    if (!canManage && req.params.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden - MANAGE_USERS permission required' });
+    }
+
+    const userExists = await assertUserInOrg(req.params.userId, req.user.orgId);
+    if (!userExists) return res.status(404).json({ error: 'User not found' });
+
+    const projectId = req.query.projectId || null;
+    if (projectId) {
+      const project = await getProjectContext(projectId, req.user.orgId);
+      if (!project) return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const perms = await getUserPermissions(req.params.userId, req.user.orgId, projectId);
+    res.json({ permissions: [...perms] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

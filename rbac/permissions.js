@@ -1,0 +1,61 @@
+// ── Permission constants ──────────────────────────────────────────────────────
+// Use these everywhere instead of raw strings to avoid typos and enable IDE autocomplete.
+
+const PERMISSIONS = Object.freeze({
+  CREATE_ISSUE:       'CREATE_ISSUE',
+  EDIT_ISSUE:         'EDIT_ISSUE',
+  DELETE_ISSUE:       'DELETE_ISSUE',
+  ASSIGN_ISSUE:       'ASSIGN_ISSUE',
+  CHANGE_STATUS:      'CHANGE_STATUS',
+  COMMENT:            'COMMENT',
+  VIEW_ISSUE:         'VIEW_ISSUE',
+  VIEW_REPORTS:       'VIEW_REPORTS',
+  MANAGE_PROJECT:     'MANAGE_PROJECT',
+  MANAGE_USERS:       'MANAGE_USERS',
+  CONFIGURE_WORKFLOW: 'CONFIGURE_WORKFLOW',
+});
+
+// Fallback permission sets for legacy role column (used when user has no user_roles entries)
+const LEGACY_ROLE_PERMISSIONS = {
+  admin: new Set(Object.values(PERMISSIONS)),
+  project_manager: new Set([
+    PERMISSIONS.CREATE_ISSUE,
+    PERMISSIONS.EDIT_ISSUE,
+    PERMISSIONS.DELETE_ISSUE,
+    PERMISSIONS.ASSIGN_ISSUE,
+    PERMISSIONS.CHANGE_STATUS,
+    PERMISSIONS.COMMENT,
+    PERMISSIONS.VIEW_ISSUE,
+    PERMISSIONS.VIEW_REPORTS,
+    PERMISSIONS.MANAGE_PROJECT,
+  ]),
+  developer: new Set([
+    PERMISSIONS.CREATE_ISSUE,
+    PERMISSIONS.EDIT_ISSUE,
+    PERMISSIONS.CHANGE_STATUS,
+    PERMISSIONS.COMMENT,
+    PERMISSIONS.VIEW_ISSUE,
+  ]),
+  tester: new Set([
+    PERMISSIONS.CREATE_ISSUE,
+    PERMISSIONS.EDIT_ISSUE,
+    PERMISSIONS.CHANGE_STATUS,
+    PERMISSIONS.COMMENT,
+    PERMISSIONS.VIEW_ISSUE,
+    PERMISSIONS.VIEW_REPORTS,
+  ]),
+  qa: new Set([
+    PERMISSIONS.CREATE_ISSUE,
+    PERMISSIONS.EDIT_ISSUE,
+    PERMISSIONS.CHANGE_STATUS,
+    PERMISSIONS.COMMENT,
+    PERMISSIONS.VIEW_ISSUE,
+    PERMISSIONS.VIEW_REPORTS,
+  ]),
+  viewer: new Set([
+    PERMISSIONS.VIEW_ISSUE,
+    PERMISSIONS.VIEW_REPORTS,
+  ]),
+};
+
+module.exports = { PERMISSIONS, LEGACY_ROLE_PERMISSIONS };

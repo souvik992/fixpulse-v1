@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
   avatar        TEXT        NOT NULL,
   color         TEXT        NOT NULL DEFAULT '#6366f1',
   password_hash TEXT,
-  role          TEXT        NOT NULL DEFAULT 'developer', -- admin | developer | qa
+  role          TEXT        NOT NULL DEFAULT 'developer', -- admin | project_manager | developer | tester | viewer | qa
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -35,6 +35,41 @@ CREATE TABLE IF NOT EXISTS projects (
   color       TEXT        NOT NULL DEFAULT '#6366f1',
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(org_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS permissions (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT        NOT NULL UNIQUE,
+  description TEXT        NOT NULL DEFAULT '',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id      UUID        REFERENCES organizations(id) ON DELETE CASCADE,
+  name        TEXT        NOT NULL,
+  description TEXT        NOT NULL DEFAULT '',
+  color       TEXT        NOT NULL DEFAULT '#6366f1',
+  is_system   BOOLEAN     NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(org_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id       UUID        NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission_id UUID        NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (role_id, permission_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id    UUID        NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  org_id     UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  project_id UUID        REFERENCES projects(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE NULLS NOT DISTINCT (user_id, role_id, org_id, project_id)
 );
 
 -- ── bugs ───────────────────────────────────────────────────────
@@ -94,8 +129,21 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 
 -- ── indexes ────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token      TEXT        NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_roles_system_name_unique
+  ON roles (LOWER(name))
+  WHERE org_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_users_org       ON users(org_id);
 CREATE INDEX IF NOT EXISTS idx_projects_org    ON projects(org_id);
+CREATE INDEX IF NOT EXISTS idx_roles_org       ON roles(org_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id, org_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_bugs_org        ON bugs(org_id);
 CREATE INDEX IF NOT EXISTS idx_bugs_project    ON bugs(project_id);
 CREATE INDEX IF NOT EXISTS idx_bugs_status     ON bugs(status);
