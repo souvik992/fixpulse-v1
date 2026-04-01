@@ -1,40 +1,227 @@
-# FixPulseHQ – Jira-like Bug Tracking App
+# FixPulseHQ
 
-A full-stack bug/issue tracking web application built with Node.js + Express + React.
+FixPulseHQ is a Jira-style issue tracker built as a single Node.js application with an Express API and a React frontend served from the same server.
 
-## Quick Start
+It supports company workspaces, JWT authentication, role-based team management, project-level issue tracking, dashboard analytics, and two storage modes:
 
-1. Open a terminal in this folder
-2. Run: `node server.js`
-3. Open your browser to: **http://localhost:3000**
+- PostgreSQL when the database is available
+- Local JSON file fallback when PostgreSQL is unavailable
 
-> Node.js must be installed. Dependencies (express, cors, uuid) are included in `node_modules/`.
+## What The App Includes
 
-## Features
+- Company registration and login
+- Multi-tenant organization isolation
+- JWT-based authentication
+- Admin, developer, and QA roles
+- Team member invite, update, removal, and password reset flows
+- Project creation and deletion
+- Issue creation, editing, filtering, and deletion
+- Kanban board with status-based workflow
+- Dashboard stats by status, priority, type, and daily issue volume
+- Comments and activity history on issues
+- Organization settings for admins
 
-- **Dashboard** – Stats cards + Line/Doughnut/Bar charts showing issue trends
-- **Kanban Board** – Drag-and-drop cards across To Do / In Progress / In Review / Done
-- **Issue List** – Sortable table with search and multi-filter (status, priority, type, assignee)
-- **Issue Detail** – Full detail view with inline status/priority/assignee editing
-- **Comments** – Add, view and delete comments on issues
-- **Activity Log** – Tracks status/priority/assignee changes with timestamps
-- **Projects** – Create and manage multiple projects with colour coding
-- **Team** – View team members and their issue stats
+## Tech Stack
 
-## Data
+- Backend: Node.js, Express
+- Frontend: React 18 loaded in the browser via CDN
+- Charts: Chart.js
+- Auth: JSON Web Tokens + bcrypt
+- Database: PostgreSQL via `pg`
+- Fallback persistence: local JSON file in `data/db.json`
+- Local development database: Docker Compose
 
-All data is stored in `data/db.json` (auto-created on first run with sample data).
+## Project Structure
 
-## API Endpoints
+```text
+.
+|-- public/
+|   |-- index.html
+|   |-- app.js
+|   `-- styles.css
+|-- db/
+|   |-- index.js
+|   |-- schema.sql
+|   `-- seed.sql
+|-- data/
+|   `-- db.json
+|-- server.js
+|-- package.json
+|-- docker-compose.yml
+`-- .env
+```
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | /api/projects | List projects |
-| POST | /api/projects | Create project |
-| GET | /api/bugs | List issues (filterable) |
-| POST | /api/bugs | Create issue |
-| PUT | /api/bugs/:id | Update issue |
-| DELETE | /api/bugs/:id | Delete issue |
-| POST | /api/bugs/:id/comments | Add comment |
-| GET | /api/stats | Dashboard statistics |
-| GET | /api/users | List users |
+## How It Works
+
+When the server starts, it tries to connect to PostgreSQL using the values in `.env`.
+
+- If PostgreSQL is available, the app uses the database in `db/schema.sql`
+- If PostgreSQL is not available, the app automatically falls back to `data/db.json`
+
+This means you can run the app quickly without Docker, but the intended primary storage is PostgreSQL.
+
+## Environment Variables
+
+The app expects a local `.env` file like this:
+
+```env
+PORT=3000
+
+JWT_SECRET=bugtracker_jwt_super_secret_key_2024
+JWT_EXPIRES_IN=7d
+
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=bugtracker
+DB_USER=bugtracker
+DB_PASSWORD=bugtracker_secret
+```
+
+## Running The App
+
+### Option 1: Run with PostgreSQL
+
+1. Install Node.js
+2. Install Docker Desktop
+3. Install dependencies:
+
+```bash
+npm install
+```
+
+4. Start PostgreSQL:
+
+```bash
+npm run db:up
+```
+
+5. Start the app:
+
+```bash
+npm start
+```
+
+6. Open:
+
+```text
+http://localhost:3000
+```
+
+### Option 2: Run without PostgreSQL
+
+If PostgreSQL is not running, the server will fall back to JSON file storage automatically.
+
+1. Install Node.js
+2. Install dependencies:
+
+```bash
+npm install
+```
+
+3. Start the app:
+
+```bash
+npm start
+```
+
+4. Open:
+
+```text
+http://localhost:3000
+```
+
+## Available Scripts
+
+- `npm start` - start the production server
+- `npm run dev` - start with `nodemon`
+- `npm run db:up` - start PostgreSQL with Docker Compose
+- `npm run db:down` - stop PostgreSQL
+- `npm run db:logs` - view PostgreSQL logs
+- `npm run db:reset` - recreate the database container and volume
+- `npm run db:psql` - open a `psql` shell inside the container
+
+## User Flow
+
+1. Open the app
+2. Register a company workspace or log in
+3. The first registered user becomes the admin
+4. Create projects
+5. Add team members
+6. Create and manage issues
+7. Use the dashboard, board, list, team, and settings views
+
+## Roles
+
+- `admin`: can manage company settings, members, and passwords
+- `developer`: can work with issues and projects
+- `qa`: can work with issues and projects
+
+## Main API Endpoints
+
+### Auth
+
+- `POST /api/auth/register-company`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
+
+### Organization
+
+- `GET /api/org`
+- `PUT /api/org`
+
+### Members
+
+- `GET /api/members`
+- `POST /api/members`
+- `PUT /api/members/:id`
+- `DELETE /api/members/:id`
+- `POST /api/members/:id/reset-password`
+
+### Projects
+
+- `GET /api/projects`
+- `POST /api/projects`
+- `DELETE /api/projects/:id`
+
+### Issues
+
+- `GET /api/bugs`
+- `GET /api/bugs/:id`
+- `POST /api/bugs`
+- `PUT /api/bugs/:id`
+- `DELETE /api/bugs/:id`
+
+### Comments
+
+- `POST /api/bugs/:id/comments`
+- `DELETE /api/bugs/:id/comments/:cid`
+
+### Stats
+
+- `GET /api/stats`
+
+## Frontend Views
+
+- Authentication screen
+- Dashboard
+- Kanban board
+- Issues list
+- Projects page
+- Team page
+- Company settings page
+
+## Notes
+
+- The frontend is served directly from `public/`
+- The app currently uses CDN-loaded React instead of a bundler-based frontend setup
+- Authentication tokens are stored in `localStorage`
+- The server serves `public/index.html` for all non-API routes
+
+## Future Improvements
+
+- Add automated tests
+- Add build tooling for the frontend
+- Add pagination and server-side sorting
+- Add richer audit logging
+- Add file attachments and issue watchers
