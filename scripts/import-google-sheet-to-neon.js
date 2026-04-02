@@ -624,32 +624,35 @@ async function main() {
     const usedEmails = new Set(existingUsersResult.rows.map((row) => row.email.toLowerCase()));
     const developerRoleId = await getSystemRoleId(client, 'developer');
 
-    const allAssigneeNames = [
+    const allUserNames = [
       ...new Set(
         normalizedSheets.flatMap((sheet) =>
-          sheet.issues.flatMap((issue) => issue.assigneeNames.map((name) => titleCase(name)).filter(Boolean))
+          sheet.issues.flatMap((issue) => [
+            ...issue.assigneeNames.map((name) => titleCase(name)).filter(Boolean),
+            titleCase(issue.reporterName || ''),
+          ].filter(Boolean))
         )
       ),
     ];
 
     await client.query('BEGIN');
     try {
-      logProgress(`Preparing users for ${allAssigneeNames.length} assignee names`);
-      for (const assigneeName of allAssigneeNames) {
-        if (userByName.has(assigneeName.toLowerCase())) {
+      logProgress(`Preparing users for ${allUserNames.length} assignee/reporter names`);
+      for (const personName of allUserNames) {
+        if (userByName.has(personName.toLowerCase())) {
           summary.reusedUsers.push({
-            name: userByName.get(assigneeName.toLowerCase()).name,
-            email: userByName.get(assigneeName.toLowerCase()).email,
+            name: userByName.get(personName.toLowerCase()).name,
+            email: userByName.get(personName.toLowerCase()).email,
           });
           continue;
         }
 
-        const email = makePlaceholderEmail(assigneeName, usedEmails);
+        const email = makePlaceholderEmail(personName, usedEmails);
         const { rows } = await client.query(
           `INSERT INTO users (org_id, name, email, avatar, color, password_hash, role)
            VALUES ($1, $2, $3, $4, $5, NULL, 'developer')
            RETURNING *`,
-          [org.id, assigneeName, email, getInitials(assigneeName), makeColor(assigneeName)]
+          [org.id, personName, email, getInitials(personName), makeColor(personName)]
         );
         const user = rows[0];
         userByName.set(user.name.toLowerCase(), user);
@@ -726,6 +729,8 @@ async function main() {
         existingBugFingerprints.add(fingerprint);
         const assigneeName = issue.assigneeNames[0] ? titleCase(issue.assigneeNames[0]) : '';
         const assigneeId = assigneeName ? userByName.get(assigneeName.toLowerCase())?.id || null : null;
+        const reporterName = titleCase(issue.reporterName || '');
+        const reporterId = reporterName ? userByName.get(reporterName.toLowerCase())?.id || null : null;
         rowsToInsert.push({
           title: issue.title,
           description: issue.description,
@@ -733,6 +738,7 @@ async function main() {
           priority: issue.priority,
           status: issue.status,
           assigneeId,
+          reporterId,
           labels: issue.labels,
           referenceLink: issue.referenceLink,
           curlCommand: issue.curlCommand,
@@ -756,7 +762,7 @@ async function main() {
           logProgress(`Inserting batch of ${batch.length} into ${sheet.name}`);
           const values = [];
           const placeholders = batch.map((row, index) => {
-            const offset = index * 13;
+            const offset = index * 14;
             values.push(
               org.id,
               row.key,
@@ -767,12 +773,13 @@ async function main() {
               row.priority,
               row.status,
               row.assigneeId,
+              row.reporterId,
               row.labels,
               JSON.stringify([]),
               row.referenceLink,
               row.curlCommand
             );
-            return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8},$${offset + 9},NULL,$${offset + 10},$${offset + 11},$${offset + 12},$${offset + 13})`;
+            return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8},$${offset + 9},$${offset + 10},$${offset + 11},$${offset + 12},$${offset + 13},$${offset + 14})`;
           });
 
           await client.query(
