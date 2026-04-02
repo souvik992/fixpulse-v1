@@ -5,4 +5,4 @@ Storage         ->  PostgreSQL
 Multi-tenant    ->  enabled
 JWT Auth        ->  enabled
 
-[sheet-sync] enabled for sheet 1a41W8XdllH-lzTBQmO4QCaRQMURAQb0Z7Z2EQjL2jXU every 60s
+[sheet-sync] enabled for sheet 1a41W8XdllH-lzTBQmO4QCaRQMURAQb0Z7Z2EQjL2jXU every 300s

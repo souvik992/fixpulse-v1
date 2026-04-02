@@ -189,9 +189,9 @@ const COLORS       = ['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899
 const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', frontend_developer:'Frontend Developer', backend_developer:'Backend Developer', tester:'QA', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Developer':'Developer', 'Frontend Developer':'Frontend Developer', 'Backend Developer':'Backend Developer', 'Tester':'QA', 'QA':'QA', 'Viewer':'Viewer' };
 const ROLE_COLORS  = { admin:'#ef4444', project_manager:'#f97316', developer:'#6366f1', frontend_developer:'#3b82f6', backend_developer:'#2563eb', tester:'#10b981', viewer:'#9ca3af', qa:'#10b981', 'Admin':'#ef4444', 'Project Manager':'#f97316', 'Developer':'#6366f1', 'Frontend Developer':'#3b82f6', 'Backend Developer':'#2563eb', 'Tester':'#10b981', 'Viewer':'#9ca3af' };
 const PLAN_OPTIONS = [
-  { code:'basic', name:'Basic', price:'Free / month', userLimit:10, blurb:'A clean starting point for small teams that need structured bug tracking without complexity.', cta:'Start Free', featured:false },
-  { code:'plus', name:'Plus', price:'$32.50 / month', userLimit:50, blurb:'A professional plan for active engineering, QA, and delivery teams that need more seats and room to grow.', cta:'Pay and Upgrade', featured:true },
-  { code:'enterprise', name:'Enterprise', price:'$108.30 / month', userLimit:null, blurb:'For larger rollouts, unlimited seats, and organizations that need unrestricted team expansion.', cta:'Pay and Upgrade', featured:false },
+  { code:'basic', name:'Basic', price:'Free', userLimit:10, blurb:'A clean starting point for small teams that need structured bug tracking without complexity.', cta:'Start Free', featured:false },
+  { code:'plus', name:'Plus', price:'$32.50 / mo', userLimit:50, blurb:'A professional plan for active engineering, QA, and delivery teams that need more seats and room to grow.', cta:'Pay and Upgrade', featured:true },
+  { code:'enterprise', name:'Enterprise', price:'$108.30 / mo', userLimit:null, blurb:'For larger rollouts, unlimited seats, and organizations that need unrestricted team expansion.', cta:'Pay and Upgrade', featured:false },
 ];
 const ALL_PERMISSIONS = ['CREATE_ISSUE','EDIT_ISSUE','DELETE_ISSUE','ASSIGN_ISSUE','CHANGE_STATUS','COMMENT','VIEW_ISSUE','VIEW_REPORTS','MANAGE_PROJECT','MANAGE_USERS','CONFIGURE_WORKFLOW'];
 
@@ -429,16 +429,6 @@ function AuthPage({ onAuth }) {
               <div className="form-group">
                 <label className="form-label">Confirm Password *</label>
                 <input className="form-input" type={showPw?'text':'password'} value={form.confirm} onChange={e=>set('confirm',e.target.value)} placeholder="Repeat password" required />
-              </div>
-            )}
-            {mode === 'register' && (
-              <div className="form-group">
-                <label className="form-label">Accent Colour</label>
-                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                  {COLORS.map(c=>(
-                    <div key={c} onClick={()=>set('color',c)} style={{ width:26,height:26,borderRadius:'50%',background:c,cursor:'pointer', border: form.color===c?'3px solid #fff':'3px solid transparent', transform: form.color===c?'scale(1.2)':'none', transition:'all .15s' }} />
-                  ))}
-                </div>
               </div>
             )}
             {mode === 'register' && (
@@ -1336,12 +1326,6 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
             <div className="form-group">
               <label className="form-label">Company Name</label>
               <input className="form-input" value={form.name} onChange={e=>setF('name',e.target.value)} required />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Brand Colour</label>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                {COLORS.map(c=><div key={c} onClick={()=>setF('color',c)} style={{width:28,height:28,borderRadius:'50%',background:c,cursor:'pointer',border:form.color===c?'3px solid #fff':'3px solid transparent',transform:form.color===c?'scale(1.2)':'none',transition:'all .15s'}}/>)}
-              </div>
             </div>
             <button type="submit" className="btn btn-primary" disabled={saving} style={{marginTop:8}}>{saving?'Saving…':'Save Changes'}</button>
           </form>

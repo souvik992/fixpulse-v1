@@ -16,7 +16,7 @@
       --primary: #2b6cff;
       --primary-deep: #1749c6;
       --accent: #0ea765;
-      --shadow: 0 28px 64px rgba(22, 34, 58, 0.08);
+      --shadow: 0 14px 28px rgba(22, 34, 58, 0.05);
       --radius: 22px;
     }
     * { box-sizing: border-box; }
@@ -81,7 +81,7 @@
       justify-content: center;
       gap: 8px;
       padding: 13px 20px;
-      border-radius: 12px;
+      border-radius: 4px;
       font-size: 14px;
       font-weight: 700;
       border: 1px solid var(--line);
@@ -101,7 +101,7 @@
       position: relative;
       min-height: 640px;
       background: #dbe5ef;
-      box-shadow: var(--shadow);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
     }
     .hero img {
       position: absolute;
@@ -115,7 +115,7 @@
       content: "";
       position: absolute;
       inset: 0;
-      background: linear-gradient(90deg, rgba(9, 24, 46, 0.42) 0%, rgba(9, 24, 46, 0.14) 38%, rgba(9, 24, 46, 0.06) 100%);
+      background: rgba(9, 24, 46, 0.16);
     }
     .hero-content {
       position: relative;
@@ -193,15 +193,23 @@
     }
     .plan {
       background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 22px;
+      border: 1px solid #d7e2ee;
+      border-radius: 6px;
       padding: 24px;
-      box-shadow: var(--shadow);
+      box-shadow: none;
       position: relative;
+      transition: border-color 0.2s ease, transform 0.2s ease;
     }
     .plan.featured {
-      border-color: rgba(43, 108, 255, 0.35);
-      box-shadow: 0 32px 70px rgba(43, 108, 255, 0.12);
+      border-color: #8fb4ff;
+      box-shadow: none;
+    }
+    .plan:hover {
+      border-color: #b7c9dd;
+      transform: translateY(-2px);
+    }
+    .plan.featured:hover {
+      border-color: #7ea8ff;
     }
     .badge {
       position: absolute;
@@ -214,7 +222,7 @@
       color: var(--primary);
       background: #edf3ff;
       border: 1px solid #cfe0ff;
-      border-radius: 999px;
+      border-radius: 4px;
       padding: 6px 10px;
     }
     .plan h3 {
@@ -352,7 +360,7 @@
       <div class="plans">
         <article class="plan">
           <h3>Basic</h3>
-          <div class="price">Free / month</div>
+          <div class="price">Free</div>
           <div class="sub">Up to 10 users</div>
           <p class="desc">A clean starting point for a small team that needs structured issue tracking without complexity.</p>
           <ul>
@@ -367,7 +375,7 @@
         <article class="plan featured">
           <div class="badge">Popular</div>
           <h3>Plus</h3>
-          <div class="price">$32.50 / month</div>
+          <div class="price">$32.50 / mo</div>
           <div class="sub">Up to 50 users</div>
           <p class="desc">A professional plan for active engineering, QA, and delivery teams that need more seats and room to grow.</p>
           <ul>
@@ -381,7 +389,7 @@
 
         <article class="plan">
           <h3>Enterprise</h3>
-          <div class="price">$108.30 / month</div>
+          <div class="price">$108.30 / mo</div>
           <div class="sub">Unlimited users</div>
           <p class="desc">For larger rollouts, unlimited seats, and organizations that need unrestricted team expansion.</p>
           <ul>

@@ -4,13 +4,13 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
-const { execFileSync } = require('child_process');
 const { spawn } = require('child_process');
+const XLSX = require('xlsx');
 const db = require('../db');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID || '1a41W8XdllH-lzTBQmO4QCaRQMURAQb0Z7Z2EQjL2jXU';
 const TARGET_ORG_NAME = process.env.GOOGLE_SHEET_TARGET_ORG || 'Twinleaves';
-const SYNC_INTERVAL_MS = Math.max(Number(process.env.SHEET_SYNC_INTERVAL_MS || 60000), 15000);
+const SYNC_INTERVAL_MS = Math.max(Number(process.env.SHEET_SYNC_INTERVAL_MS || 300000), 15000);
 const ENABLED = String(process.env.SHEET_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const IGNORED_SHEETS = new Set(['Summary', 'Master']);
 
@@ -56,107 +56,29 @@ function download(url, dest) {
   });
 }
 
-function parseWorkbookViaPowerShell(xlsxPath) {
-  const psScript = `
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path '${xlsxPath.replace(/'/g, "''")}'))
-function Get-EntryText($path) {
-  $entry = $zip.GetEntry($path)
-  if (-not $entry) { return $null }
-  $sr = New-Object System.IO.StreamReader($entry.Open())
-  try { return $sr.ReadToEnd() } finally { $sr.Dispose() }
-}
-function ColToIndex($letters) {
-  $sum = 0
-  foreach($ch in $letters.ToCharArray()) { $sum = ($sum * 26) + ([int][char]$ch - [int][char]'A' + 1) }
-  return $sum - 1
-}
-function Get-SharedStringValue($si) {
-  if ($si.t) { return [string]$si.t }
-  if ($si.r) {
-    return (($si.r | ForEach-Object {
-      if ($_.t -is [string]) { $_.t }
-      elseif ($_.t.'#text') { $_.t.'#text' }
-      else { [string]$_.t }
-    }) -join '')
-  }
-  return ''
-}
-$sharedXmlText = Get-EntryText 'xl/sharedStrings.xml'
-$shared = @()
-if ($sharedXmlText) {
-  $sharedXml = [xml]$sharedXmlText
-  foreach($si in $sharedXml.sst.si){ $shared += (Get-SharedStringValue $si) }
-}
-$workbook = [xml](Get-EntryText 'xl/workbook.xml')
-$rels = [xml](Get-EntryText 'xl/_rels/workbook.xml.rels')
-$relMap = @{}
-foreach($rel in $rels.Relationships.Relationship){ $relMap[$rel.Id] = $rel.Target }
-$nsRel = New-Object System.Xml.XmlNamespaceManager($workbook.NameTable)
-$nsRel.AddNamespace('x','http://schemas.openxmlformats.org/spreadsheetml/2006/main')
-$nsRel.AddNamespace('r','http://schemas.openxmlformats.org/officeDocument/2006/relationships')
-$sheets = $workbook.SelectNodes('//x:sheets/x:sheet', $nsRel)
-$result = @()
-foreach($sheet in $sheets){
-  $name = $sheet.GetAttribute('name')
-  $state = $sheet.GetAttribute('state')
-  if (-not $state) { $state = 'visible' }
-  $rid = $sheet.GetAttribute('id','http://schemas.openxmlformats.org/officeDocument/2006/relationships')
-  $target = $relMap[$rid]
-  $sheetXmlText = Get-EntryText ('xl/' + $target)
-  if (-not $sheetXmlText) { continue }
-  $sheetXml = [xml]$sheetXmlText
-  $ns = New-Object System.Xml.XmlNamespaceManager($sheetXml.NameTable)
-  $ns.AddNamespace('x','http://schemas.openxmlformats.org/spreadsheetml/2006/main')
-  $rows = @()
-  foreach($row in $sheetXml.SelectNodes('//x:sheetData/x:row', $ns)) {
-    $cells = @{}
-    $maxIndex = -1
-    foreach($c in $row.SelectNodes('x:c', $ns)) {
-      $ref = $c.GetAttribute('r')
-      $col = ([regex]::Match($ref,'[A-Z]+')).Value
-      $idx = ColToIndex $col
-      if ($idx -gt $maxIndex) { $maxIndex = $idx }
-      $t = $c.GetAttribute('t')
-      $vNode = $c.SelectSingleNode('x:v', $ns)
-      $value = ''
-      if ($vNode) {
-        $raw = [string]$vNode.InnerText
-        if ($t -eq 's') {
-          $value = $shared[[int]$raw]
-        } else {
-          $value = $raw
-        }
-      } else {
-        $inlineNode = $c.SelectSingleNode('x:is/x:t', $ns)
-        if ($inlineNode) { $value = [string]$inlineNode.InnerText }
-      }
-      if ($value -isnot [string]) { $value = [string]$value }
-      $value = $value.Trim()
-      $cells[$idx] = $value
-    }
-    if ($maxIndex -ge 0) {
-      $rowValues = @()
-      foreach($i in 0..$maxIndex) {
-        if ($cells.ContainsKey($i)) { $rowValues += $cells[$i] } else { $rowValues += '' }
-      }
-      while ($rowValues.Count -gt 0 -and [string]::IsNullOrWhiteSpace($rowValues[$rowValues.Count - 1])) {
-        $rowValues = $rowValues[0..($rowValues.Count - 2)]
-      }
-      if ($rowValues.Count -gt 0) { $rows += ,@($rowValues) }
-    }
-  }
-  $result += [pscustomobject]@{ name=$name; state=$state; rows=$rows }
-}
-$zip.Dispose()
-$result | ConvertTo-Json -Depth 8 -Compress
-`;
-  const output = execFileSync('powershell', ['-NoProfile', '-Command', psScript], {
-    encoding: 'utf8',
-    maxBuffer: 1024 * 1024 * 80,
+function parseWorkbookViaXlsx(xlsxPath) {
+  const workbook = XLSX.readFile(xlsxPath, {
+    cellDates: false,
+    cellNF: false,
+    cellText: false,
+    dense: true,
   });
-  const parsed = JSON.parse(output);
-  return Array.isArray(parsed) ? parsed : [parsed];
+
+  return workbook.SheetNames.map((sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      raw: true,
+      defval: '',
+      blankrows: false,
+    }).map((row) => (Array.isArray(row) ? row.map((cell) => (cell === undefined || cell === null ? '' : String(cell))) : []));
+
+    return {
+      name: sheetName,
+      state: 'visible',
+      rows,
+    };
+  });
 }
 
 function cleanValue(value) {
@@ -619,7 +541,7 @@ async function syncOnce() {
 
     const syncPath = path.join(process.cwd(), 'data', `live-sheet-sync-${process.pid}-${Date.now()}.xlsx`);
     await download(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=xlsx`, syncPath);
-    const workbook = parseWorkbookViaPowerShell(syncPath);
+    const workbook = parseWorkbookViaXlsx(syncPath);
     try { fs.unlinkSync(syncPath); } catch {}
     const sheets = normalizeWorkbook(workbook);
 
@@ -882,7 +804,7 @@ function triggerGoogleSheetSync() {
 module.exports = {
   startGoogleSheetSync,
   getGoogleSheetSyncStatus,
-  parseWorkbookViaPowerShell,
+  parseWorkbookViaXlsx,
   normalizeWorkbook,
 };
 
