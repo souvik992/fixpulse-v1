@@ -338,7 +338,21 @@ function mapType(raw) {
 function parseExcelDate(raw) {
   const value = cleanValue(raw);
   if (!value) return '';
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(value)) return value;
+  const slashMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+  }
+  const dashMatch = value.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dashMatch) {
+    const [, day, month, year] = dashMatch;
+    return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+  }
+  const isoMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+  }
   const num = Number(value);
   if (!Number.isFinite(num)) return value;
   const epoch = new Date(Date.UTC(1899, 11, 30));
@@ -365,6 +379,36 @@ function parseSheetDateToIso(raw) {
   }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function extractRowCreatedDate(row) {
+  const values = row.map(cleanValue).filter(Boolean);
+  if (!values.length) return null;
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    const normalized = value.toLowerCase();
+    const embedded = normalized.match(/(?:^|[^0-9])(\d{1,2}[\/-]\d{1,2}[\/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})(?:[^0-9]|$)/);
+    if (embedded) {
+      const iso = parseSheetDateToIso(embedded[1]);
+      if (iso) return iso;
+    }
+
+    if (normalized === 'date' || normalized.endsWith(' date') || normalized.includes('date:')) {
+      const sameCell = value.split(':').slice(1).join(':').trim();
+      const sameCellIso = parseSheetDateToIso(sameCell);
+      if (sameCellIso) return sameCellIso;
+      const nextIso = parseSheetDateToIso(values[index + 1] || '');
+      if (nextIso) return nextIso;
+    }
+  }
+
+  for (const value of values) {
+    const iso = parseSheetDateToIso(value);
+    if (iso) return iso;
+  }
+
+  return null;
 }
 
 function makeColor(seed) {
@@ -432,8 +476,9 @@ function sanitizeLabel(value) {
 }
 
 function buildIssueRecord(sheetName, headerMap, row) {
+  const inferredCreatedAt = extractRowCreatedDate(row);
   const raw = {
-    date: getByHeader(row, headerMap, [/^date$/, /^issue raised on$/, /^raised on$/, /^expected date$/, /^due date$/]),
+    date: inferredCreatedAt ? parseExcelDate(inferredCreatedAt.slice(0, 10)) : '',
     raisedBy: getByHeader(row, headerMap, [/^issue raised by$/, /^raised by$/, /^qa owner$/, /^tested by$/]),
     application: getByHeader(row, headerMap, [/^application$/, /^product$/, /^apppliation$/]),
     issueType: getByHeader(row, headerMap, [/^issue type$/, /^bug type$/, /^type$/]),
@@ -477,7 +522,7 @@ function buildIssueRecord(sheetName, headerMap, row) {
 
   const metadata = [
     ['Source Tab', sheetName],
-    ['Date', parseExcelDate(raw.date)],
+    ['Date', raw.date],
     ['Raised By', raw.raisedBy],
     ['Application', raw.application],
     ['Issue Type', raw.issueType],
@@ -522,7 +567,7 @@ function buildIssueRecord(sheetName, headerMap, row) {
   return {
     title: title.length > 500 ? title.slice(0, 497) + '...' : title,
     description,
-    sourceCreatedAt: parseSheetDateToIso(raw.date),
+    sourceCreatedAt: inferredCreatedAt,
     type: mapType(raw.issueType),
     priority: mapPriority(raw.priorityRaw),
     status: mapStatus(raw.statusRaw),

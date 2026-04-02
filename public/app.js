@@ -37,6 +37,12 @@ const formatIssueCreatedDate = bug => {
   if (!createdAt) return 'Unavailable';
   return formatDate(createdAt);
 };
+const escapeHtml = value => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 const getInitials = name => String(name||'').split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0,2).toUpperCase() || '?';
 const getMetadataValue = (description, label) => {
   if (!description) return '';
@@ -56,6 +62,138 @@ const resolveIssueUser = (bug, users, idKey, metadataLabels) => {
   if (user) return user;
   const fallbackName = getFirstMetadataValue(bug?.description, Array.isArray(metadataLabels) ? metadataLabels : [metadataLabels]);
   return fallbackName ? { name: fallbackName, avatar: getInitials(fallbackName), color: '#64748b' } : null;
+};
+const renderCompactStatusPills = stats => Object.entries(stats.byStatus || {})
+  .map(([label, count]) => `<div class="pill"><span>${escapeHtml(label)}</span><strong>${count}</strong></div>`)
+  .join('');
+const renderPriorityBars = stats => {
+  const entries = Object.entries(stats.byPriority || {});
+  const max = Math.max(...entries.map(([, count]) => Number(count) || 0), 1);
+  return entries.map(([label, count]) => `
+    <div class="bar-row">
+      <div class="bar-meta"><span>${escapeHtml(label)}</span><strong>${count}</strong></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.max((Number(count) || 0) / max * 100, 4)}%"></div></div>
+    </div>
+  `).join('');
+};
+const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) => {
+  const rows = bugs.map(bug => {
+    const assignee = resolveIssueUser(bug, users, 'assigneeId', ['Assignee(s)', 'Assignee From Sheet']);
+    const reporter = resolveIssueUser(bug, users, 'reporterId', 'Raised By');
+    return `
+      <tr>
+        <td>${escapeHtml(bug.key || '')}</td>
+        <td>${escapeHtml(formatIssueCreatedDate(bug))}</td>
+        <td>${escapeHtml(bug.title)}</td>
+        <td>${escapeHtml(reporter?.name || 'Unknown')}</td>
+        <td>${escapeHtml(bug.type || 'Bug')}</td>
+        <td>${escapeHtml(assignee?.name || 'Unassigned')}</td>
+        <td>${escapeHtml(bug.priority || 'Medium')}</td>
+        <td>${escapeHtml(bug.status || 'To Do')}</td>
+        <td>${escapeHtml(formatDate(bug.updatedAt))}</td>
+      </tr>
+    `;
+  }).join('');
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(project.name)} Report - FixPulse</title>
+  <style>
+    :root { --ink:#0f172a; --muted:#475569; --line:#dbe3ef; --surface:#ffffff; --soft:#f8fafc; --accent:${project.color || '#16a34a'}; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Arial,sans-serif; color:var(--ink); background:#eef3f8; }
+    .page { max-width:1180px; margin:32px auto; background:var(--surface); border:1px solid var(--line); border-radius:24px; overflow:hidden; box-shadow:0 20px 70px rgba(15,23,42,.08); }
+    .hero { padding:32px; background:linear-gradient(135deg, #08121f 0%, #102336 48%, ${project.color || '#16a34a'} 220%); color:#fff; }
+    .brand { display:flex; align-items:center; gap:14px; margin-bottom:22px; }
+    .brand img { width:48px; height:48px; border-radius:14px; object-fit:cover; background:#fff; }
+    .eyebrow { text-transform:uppercase; letter-spacing:.18em; font-size:12px; opacity:.72; margin-bottom:8px; }
+    h1 { margin:0; font-size:34px; line-height:1.1; }
+    .hero p { margin:10px 0 0; color:rgba(255,255,255,.82); font-size:15px; }
+    .meta { display:flex; gap:18px; flex-wrap:wrap; margin-top:22px; font-size:13px; color:rgba(255,255,255,.82); }
+    .content { padding:28px 32px 36px; }
+    .metrics { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:16px; margin-bottom:22px; }
+    .card { background:var(--soft); border:1px solid var(--line); border-radius:18px; padding:18px; }
+    .metric-label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+    .metric-value { margin-top:8px; font-size:32px; font-weight:700; }
+    .grid { display:grid; grid-template-columns:1.2fr .8fr; gap:18px; margin-bottom:18px; }
+    .section-title { margin:0 0 14px; font-size:15px; }
+    .pill-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px; }
+    .pill { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:14px; background:#fff; border:1px solid var(--line); }
+    .bar-row + .bar-row { margin-top:12px; }
+    .bar-meta { display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px; }
+    .bar-track { height:10px; background:#e2e8f0; border-radius:999px; overflow:hidden; }
+    .bar-fill { height:100%; background:linear-gradient(90deg, ${project.color || '#16a34a'}, #0f172a); border-radius:999px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { padding:12px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:#f8fafc; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; position:sticky; top:0; }
+    .table-wrap { max-height:70vh; overflow:auto; border:1px solid var(--line); border-radius:18px; }
+    .footer { margin-top:18px; color:var(--muted); font-size:12px; }
+    @media print { body { background:#fff; } .page { margin:0; border:none; box-shadow:none; } }
+    @media (max-width: 900px) { .metrics, .grid { grid-template-columns:1fr; } .content, .hero { padding:22px; } h1 { font-size:28px; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <div class="brand">
+        <img src="${escapeHtml(window.location.origin + BRAND_LOGO)}" alt="FixPulse" />
+        <div>
+          <div class="eyebrow">FixPulse Project Report</div>
+          <h1>${escapeHtml(project.name)}</h1>
+        </div>
+      </div>
+      <p>${escapeHtml(project.description || 'Project issue summary and tracker report.')}</p>
+      <div class="meta">
+        <span>Project Key: ${escapeHtml(project.key || '-')}</span>
+        <span>Generated: ${escapeHtml(new Date(generatedAt).toLocaleString('en-GB'))}</span>
+        <span>Total Issues: ${bugs.length}</span>
+      </div>
+    </div>
+    <div class="content">
+      <div class="metrics">
+        <div class="card"><div class="metric-label">Total Issues</div><div class="metric-value">${stats.total}</div></div>
+        <div class="card"><div class="metric-label">Open Issues</div><div class="metric-value">${stats.openCount}</div></div>
+        <div class="card"><div class="metric-label">Completed</div><div class="metric-value">${stats.doneCount}</div></div>
+        <div class="card"><div class="metric-label">Critical</div><div class="metric-value">${stats.byPriority?.Critical || 0}</div></div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h2 class="section-title">Status Breakdown</h2>
+          <div class="pill-grid">${renderCompactStatusPills(stats)}</div>
+        </div>
+        <div class="card">
+          <h2 class="section-title">Priority Breakdown</h2>
+          ${renderPriorityBars(stats)}
+        </div>
+      </div>
+      <div class="card">
+        <h2 class="section-title">Issue Register</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Date Created</th>
+                <th>Issue Title</th>
+                <th>Raised By</th>
+                <th>Issue Type</th>
+                <th>Assignee</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th>Last Updated</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="footer">Generated from FixPulse. This HTML report is ready to print or save as PDF from the browser.</div>
+    </div>
+  </div>
+</body>
+</html>`;
 };
 const COLORS       = ['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
 const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', frontend_developer:'Frontend Developer', backend_developer:'Backend Developer', tester:'QA', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Developer':'Developer', 'Frontend Developer':'Frontend Developer', 'Backend Developer':'Backend Developer', 'Tester':'QA', 'QA':'QA', 'Viewer':'Viewer' };
@@ -589,6 +727,38 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
   const lineRef=useRef(null),doughnutRef=useRef(null),barRef=useRef(null);
   const lineChart=useRef(null),doughnutChart=useRef(null),barChart=useRef(null);
   useEffect(()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; api.get(url).then(setStats); const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; api.get(bu).then(b=>setRecentBugs(b.slice(0,5))); },[currentProject]);
+  const exportReport = async () => {
+    if (!currentProject) {
+      toast('Select a project first to export its report', 'info');
+      return;
+    }
+    const popup = window.open('', '_blank', 'noopener,noreferrer');
+    if (!popup) {
+      toast('Allow pop-ups to open the HTML report', 'error');
+      return;
+    }
+    popup.document.write('<!doctype html><title>Preparing report...</title><body style="font-family:Arial,sans-serif;padding:24px">Preparing project report...</body>');
+    try {
+      const [reportStats, reportBugs] = await Promise.all([
+        api.get(`/api/stats?projectId=${currentProject.id}`),
+        api.get(`/api/bugs?projectId=${currentProject.id}`),
+      ]);
+      const html = buildProjectReportHtml({
+        project: currentProject,
+        stats: reportStats,
+        bugs: reportBugs,
+        users,
+        generatedAt: Date.now(),
+      });
+      popup.document.open();
+      popup.document.write(html);
+      popup.document.close();
+      toast('Project report opened in a new tab', 'success');
+    } catch (error) {
+      popup.close();
+      toast('Unable to generate project report', 'error');
+    }
+  };
   useEffect(()=>{
     if (!stats || stats.error || !Array.isArray(stats.daily) || !stats.byStatus || !stats.byPriority) return;
     if (lineChart.current) lineChart.current.destroy();
@@ -609,7 +779,7 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
   );
   return (
     <div>
-      <div className="page-header"><div><h1>Dashboard</h1><p>{currentProject?currentProject.name:'All Projects'} · Overview</p></div><button className="btn btn-primary" onClick={()=>onNavigate('list')}>View All Issues →</button></div>
+      <div className="page-header"><div><h1>Dashboard</h1><p>{currentProject?currentProject.name:'All Projects'} · Overview</p></div><div style={{display:'flex',gap:10,flexWrap:'wrap'}}><button className="btn btn-ghost" onClick={exportReport}>Export Report</button><button className="btn btn-primary" onClick={()=>onNavigate('list')}>View All Issues →</button></div></div>
       <div className="stats-grid">
         {[{label:'Total Issues',value:stats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:stats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:stats.doneCount,sub:'marked as done',color:'#10b981'},{label:'Critical',value:stats.byPriority.Critical,sub:'critical priority',color:'#ef4444'}].map(card=>(
           <div key={card.label} className="stat-card"><div className="label">{card.label}</div><div className="value" style={{color:card.color}}>{card.value}</div><div className="sub">{card.sub}</div></div>
