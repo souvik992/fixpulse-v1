@@ -9,11 +9,12 @@ const { sendAssigneeNotification, sendPasswordResetEmail } = require('./utils/em
 const { randomUUID } = require('crypto');
 const { PERMISSIONS } = require('./rbac/permissions');
 const { checkPermission, assignSystemRole, getUserPermissions, LEGACY_TO_RBAC } = require('./rbac/middleware');
+const { startGoogleSheetSync, getGoogleSheetSyncStatus } = require('./services/googleSheetSync');
 
 // ── In-memory presence store ──────────────────────────────────────────────────
 // Map<orgId, Map<userId, { lastSeen: Date, user: { id, name, avatar, color } }>>
 const presenceStore = new Map();
-const PRESENCE_TIMEOUT_MS = 60_000; // 60 s without heartbeat = offline
+const PRESENCE_TIMEOUT_MS = 45_000; // 45 s without heartbeat = offline
 
 function getOrgPresence(orgId) {
   if (!presenceStore.has(orgId)) presenceStore.set(orgId, new Map());
@@ -23,6 +24,10 @@ function getOrgPresence(orgId) {
 function markPresence(orgId, userId, userData) {
   const org = getOrgPresence(orgId);
   org.set(userId, { lastSeen: Date.now(), user: userData });
+}
+
+function removePresence(orgId, userId) {
+  presenceStore.get(orgId)?.delete(userId);
 }
 
 function getOnlineUsers(orgId) {
@@ -1073,15 +1078,46 @@ app.get('/api/rbac/users/:userId/permissions', auth, async (req, res) => {
 
 // ── Presence ────────────────────────────────────────────────────────────────
 // POST /api/presence/heartbeat — client calls every 30 s to stay "online"
-app.post('/api/presence/heartbeat', auth, (req, res) => {
-  const { id, name, avatar, color } = req.user;
-  markPresence(req.user.orgId, id, { id, name, avatar, color });
-  res.json({ ok: true });
+app.post('/api/presence/heartbeat', auth, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT id, name, avatar, color FROM users WHERE id=$1 AND org_id=$2',
+      [req.user.id, req.user.orgId]
+    );
+    if (!rows[0]) return res.sendStatus(204);
+    const { id, name, avatar, color } = rows[0];
+    markPresence(req.user.orgId, id, { id, name, avatar, color });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/presence/offline — called via sendBeacon on tab close
+// Token comes in the JSON body because sendBeacon cannot set auth headers
+app.post('/api/presence/offline', (req, res) => {
+  try {
+    const token = req.body?.token;
+    if (!token) return res.sendStatus(204);
+    const payload = jwt.verify(token, JWT_SECRET);
+    removePresence(payload.orgId, payload.id);
+  } catch { /* invalid token — ignore */ }
+  res.sendStatus(204);
 });
 
 // GET /api/presence — returns online users in same org
 app.get('/api/presence', auth, (req, res) => {
   res.json(getOnlineUsers(req.user.orgId));
+});
+
+app.get('/api/sheet-sync/status', auth, async (req, res) => {
+  try {
+    const canManage = (await getScopedPermissions(req)).has(PERMISSIONS.MANAGE_PROJECT);
+    if (!canManage) {
+      return res.status(403).json({ error: 'Forbidden - MANAGE_PROJECT permission required' });
+    }
+    res.json(getGoogleSheetSyncStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
@@ -1094,6 +1130,7 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
       console.log('Storage         ->  PostgreSQL');
       console.log('Multi-tenant    ->  enabled');
       console.log('JWT Auth        ->  enabled\n');
+      startGoogleSheetSync();
     });
   } catch (error) {
     console.error(error.message);

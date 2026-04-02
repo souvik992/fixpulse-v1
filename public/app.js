@@ -1251,12 +1251,32 @@ function App() {
   // ── Presence: heartbeat + poll online users ──
   useEffect(() => {
     if (!authUser) return;
-    const beat = () => api.post('/api/presence/heartbeat', {});
+
+    const sendOfflineBeacon = () => {
+      const token = Token.get();
+      if (token) navigator.sendBeacon('/api/presence/offline', JSON.stringify({ token }));
+    };
+
+    const beat = () => { if (!document.hidden) api.post('/api/presence/heartbeat', {}); };
     const poll = () => api.get('/api/presence').then(data => { if (Array.isArray(data)) setOnlineUsers(data); });
+
     beat(); poll();
     const beatTimer = setInterval(beat, 30_000);
     const pollTimer = setInterval(poll, 30_000);
-    return () => { clearInterval(beatTimer); clearInterval(pollTimer); };
+
+    // Resume heartbeat immediately when tab becomes visible again
+    const onVisibility = () => { if (!document.hidden) { beat(); poll(); } };
+
+    window.addEventListener('beforeunload', sendOfflineBeacon);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      clearInterval(beatTimer);
+      clearInterval(pollTimer);
+      window.removeEventListener('beforeunload', sendOfflineBeacon);
+      document.removeEventListener('visibilitychange', onVisibility);
+      sendOfflineBeacon();
+    };
   }, [authUser]);
 
   const handleAuth = (user, org) => {
