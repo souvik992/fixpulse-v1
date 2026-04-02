@@ -8,180 +8,184 @@
   <link rel="shortcut icon" href="/favicon.ico" />
   <style>
     :root {
-      --bg: #f8fafc;
+      --bg: #f6f8fc;
       --surface: #ffffff;
-      --surface-soft: #f1f5f9;
-      --border: #dbe4ee;
-      --text: #102033;
-      --muted: #5f7288;
-      --primary: #17a34a;
-      --primary-strong: #12803a;
-      --secondary: #0f172a;
-      --shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
-      --radius: 24px;
+      --text: #10233f;
+      --muted: #607089;
+      --line: #dde6f0;
+      --primary: #2b6cff;
+      --primary-deep: #1749c6;
+      --accent: #0ea765;
+      --shadow: 0 28px 64px rgba(22, 34, 58, 0.08);
+      --radius: 22px;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       margin: 0;
       font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
       color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 24%),
-        radial-gradient(circle at top right, rgba(34, 197, 94, 0.12), transparent 22%),
-        linear-gradient(180deg, #f8fafc 0%, #eef4f8 100%);
     }
-    a { text-decoration: none; color: inherit; }
-    .shell { max-width: 1180px; margin: 0 auto; padding: 0 24px 72px; }
-    .header {
+    a { color: inherit; text-decoration: none; }
+    .shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 0 18px 72px;
+    }
+    .topbar {
+      height: 72px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 22px 0;
+      gap: 18px;
     }
     .brand {
       display: flex;
       align-items: center;
       gap: 12px;
+      flex-shrink: 0;
       font-weight: 800;
-      letter-spacing: -0.02em;
+      letter-spacing: -0.03em;
+      font-size: 28px;
+      color: #16335f;
     }
     .brand img {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
       object-fit: contain;
       background: #fff;
-      border: 1px solid var(--border);
-      padding: 4px;
+      border: 1px solid var(--line);
+      padding: 3px;
     }
-    .brand small {
-      display: block;
-      color: var(--muted);
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      margin-top: 2px;
-    }
-    .nav-actions {
+    .actions {
       display: flex;
-      gap: 12px;
       align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
     }
+    .legal-nav {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      margin-left: auto;
+      margin-right: 10px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .legal-nav a:hover { color: var(--primary); }
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 12px 18px;
-      border-radius: 999px;
+      gap: 8px;
+      padding: 13px 20px;
+      border-radius: 12px;
+      font-size: 14px;
       font-weight: 700;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--secondary);
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--primary);
     }
     .btn-primary {
       background: var(--primary);
       border-color: var(--primary);
       color: #fff;
     }
-    .btn-primary:hover { background: var(--primary-strong); }
+    .btn-primary:hover { background: var(--primary-deep); }
     .hero {
-      position: relative;
-      padding: 22px 0 34px;
-    }
-    .hero-banner {
+      margin-top: 8px;
+      border-radius: 8px;
+      overflow: hidden;
       position: relative;
       min-height: 640px;
-      border-radius: 32px;
-      overflow: hidden;
+      background: #dbe5ef;
       box-shadow: var(--shadow);
-      border: 1px solid rgba(219, 228, 238, 0.9);
-      background: #dbe7ef;
     }
-    .hero-banner::after {
-      content: "";
+    .hero img {
       position: absolute;
       inset: 0;
-      background: linear-gradient(90deg, rgba(8, 15, 26, 0.68) 0%, rgba(8, 15, 26, 0.24) 48%, rgba(8, 15, 26, 0.08) 100%);
-    }
-    .hero-banner img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
     }
-    .hero-overlay {
+    .hero::after {
+      content: "";
       position: absolute;
       inset: 0;
+      background: linear-gradient(90deg, rgba(9, 24, 46, 0.42) 0%, rgba(9, 24, 46, 0.14) 38%, rgba(9, 24, 46, 0.06) 100%);
+    }
+    .hero-content {
+      position: relative;
       z-index: 2;
+      padding: 50px 0 50px 0;
+      min-height: 640px;
       display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 38px;
+      align-items: center;
     }
-    .hero-copy-box {
-      max-width: 520px;
-      background: rgba(255, 255, 255, 0.82);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.6);
-      border-radius: 28px;
-      padding: 28px;
-      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.14);
+    .hero-card {
+      margin-left: 42px;
+      width: min(560px, calc(100% - 84px));
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid rgba(221, 230, 240, 0.95);
+      border-radius: 6px;
+      padding: 38px 40px;
+      box-shadow: 0 32px 80px rgba(15, 23, 42, 0.14);
     }
-    .hero h1 {
+    .hero-card h1 {
       margin: 0 0 16px;
-      font-size: clamp(42px, 5vw, 64px);
-      line-height: 0.98;
+      font-size: clamp(40px, 5vw, 58px);
+      line-height: 1.04;
       letter-spacing: -0.05em;
-      max-width: 680px;
+      font-weight: 500;
     }
-    .hero p {
-      margin: 0 0 24px;
-      color: var(--muted);
-      line-height: 1.8;
-      font-size: 17px;
-      max-width: 640px;
-    }
-    .hero-stats-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
-      max-width: 660px;
-      align-self: flex-end;
-    }
-    .info-box {
-      background: rgba(255, 255, 255, 0.88);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.66);
-      border-radius: 22px;
-      padding: 18px 18px 16px;
-      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
-    }
-    .info-box strong {
+    .hero-card h1 span {
+      color: var(--accent);
+      font-weight: 700;
       display: block;
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--primary-strong);
-      margin-bottom: 8px;
+      margin-top: 6px;
     }
-    .info-box p {
-      margin: 0;
+    .hero-card p {
+      margin: 0 0 26px;
       color: var(--muted);
-      line-height: 1.6;
+      font-size: 16px;
+      line-height: 1.65;
+      max-width: 430px;
+    }
+    .logos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 28px;
+      color: #23344f;
+      font-weight: 800;
+      font-size: 18px;
+      opacity: 0.78;
+    }
+    .logos span.small {
       font-size: 14px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .section {
+      padding-top: 42px;
     }
     .section-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: end;
-      gap: 18px;
-      margin: 18px 0 18px;
+      margin-bottom: 18px;
     }
     .section-head h2 {
       margin: 0 0 8px;
-      font-size: 30px;
-      letter-spacing: -0.03em;
+      font-size: 31px;
+      letter-spacing: -0.04em;
     }
-    .section-head p { margin: 0; color: var(--muted); }
+    .section-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
     .plans {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -189,127 +193,161 @@
     }
     .plan {
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      border-radius: 22px;
       padding: 24px;
       box-shadow: var(--shadow);
       position: relative;
     }
     .plan.featured {
-      border-color: rgba(23, 163, 74, 0.35);
-      box-shadow: 0 28px 64px rgba(23, 163, 74, 0.12);
+      border-color: rgba(43, 108, 255, 0.35);
+      box-shadow: 0 32px 70px rgba(43, 108, 255, 0.12);
     }
     .badge {
       position: absolute;
-      top: 18px;
-      right: 18px;
+      top: 16px;
+      right: 16px;
       font-size: 11px;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: var(--primary-strong);
-      background: #e8f9ef;
-      border: 1px solid #bcebc9;
+      color: var(--primary);
+      background: #edf3ff;
+      border: 1px solid #cfe0ff;
       border-radius: 999px;
       padding: 6px 10px;
     }
-    .plan h3 { margin: 0 0 10px; font-size: 26px; }
-    .price { font-size: 38px; font-weight: 800; letter-spacing: -0.04em; margin-bottom: 6px; }
-    .sub { color: var(--muted); margin-bottom: 16px; }
-    .desc { color: var(--muted); line-height: 1.7; min-height: 74px; margin-bottom: 18px; }
-    ul { list-style: none; padding: 0; margin: 0 0 22px; display: grid; gap: 12px; }
+    .plan h3 {
+      margin: 0 0 10px;
+      font-size: 26px;
+      letter-spacing: -0.03em;
+    }
+    .price {
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      margin-bottom: 6px;
+    }
+    .sub {
+      color: var(--muted);
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+    .desc {
+      color: var(--muted);
+      line-height: 1.7;
+      min-height: 74px;
+      margin-bottom: 18px;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 20px;
+      display: grid;
+      gap: 12px;
+    }
     li {
       display: flex;
       gap: 10px;
       align-items: flex-start;
       line-height: 1.55;
+      color: #243a58;
     }
     li::before {
       content: "•";
-      color: var(--primary);
+      color: var(--accent);
       font-size: 22px;
       line-height: 1;
       transform: translateY(-2px);
     }
     .plan .btn { width: 100%; }
     .footnote {
-      margin-top: 20px;
+      margin-top: 18px;
       text-align: center;
-      font-size: 13px;
       color: var(--muted);
+      font-size: 13px;
     }
-    @media (max-width: 980px) {
-      .hero-banner { min-height: 760px; }
-      .hero-overlay { padding: 22px; }
-      .hero-copy-box { max-width: 100%; }
-      .hero-stats-grid {
-        grid-template-columns: 1fr;
-        max-width: 100%;
-        align-self: stretch;
+    @media (max-width: 1080px) {
+      .legal-nav { display: none; }
+      .hero-card {
+        margin: 24px;
+        width: auto;
       }
-      .plans { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 860px) {
+      .topbar {
+        height: auto;
+        padding: 16px 0;
+        flex-wrap: wrap;
+      }
+      .actions { width: 100%; justify-content: flex-end; }
+      .hero {
+        min-height: 720px;
+      }
+      .hero-content {
+        min-height: 720px;
+        align-items: flex-start;
+        padding-top: 28px;
+      }
+      .hero-card {
+        margin: 18px;
+        padding: 28px 24px;
+      }
+      .plans {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 <body>
   <div class="shell">
-    <header class="header">
+    <header class="topbar">
       <a class="brand" href="/">
         <img src="/fixpulse-logo.png" alt="FixPulse logo" />
-        <span>
-          FixPulse
-          <small>Bug Tracker</small>
-        </span>
+        <span>FixPulse</span>
       </a>
-      <div class="nav-actions">
-        <a class="btn" href="/login">Sign In</a>
-        <a class="btn btn-primary" href="/login">Register</a>
+      <nav class="legal-nav">
+        <a href="/license.html">License</a>
+        <a href="/eula.html">EULA</a>
+        <a href="/business-policy.html">Business Policy</a>
+      </nav>
+      <div class="actions">
+        <a class="btn" href="/login">Login</a>
+        <a class="btn btn-primary" href="/login">Sign Up →</a>
       </div>
     </header>
 
     <section class="hero">
-      <div class="hero-banner">
-        <img src="/index-banner.png" alt="FixPulse banner" />
-        <div class="hero-overlay">
-          <div class="hero-copy-box">
-            <h1>Clean bug tracking for teams that want clarity, not clutter.</h1>
-            <p>
-              FixPulse brings issues, ownership, exports, dashboards, and team workflows into one lightweight,
-              professional space. Start free, scale when your team grows, and keep the experience fast and simple.
-            </p>
-            <div class="nav-actions">
-              <a class="btn btn-primary" href="/login">Get Started</a>
-              <a class="btn" href="#plans">See Plans</a>
-            </div>
+      <img src="/index-banner.png" alt="FixPulse banner" />
+      <div class="hero-content">
+        <div class="hero-card">
+          <h1>
+            Clean bug
+            <span>tracking for teams that want clarity, not clutter.</span>
+          </h1>
+          <p>
+            FixPulse brings issues, ownership, exports, dashboards, and team workflows into one lightweight,
+            professional space. Start free, scale when your team grows, and keep the experience fast and simple.
+          </p>
+          <div class="logos">
+            <span>QA</span>
+            <span>DEV</span>
+            <span>OPS</span>
+            <span>PM</span>
+            <span class="small">+ teams of every size</span>
           </div>
-          <div class="hero-stats-grid">
-            <div class="info-box">
-              <strong>Issue Tracking</strong>
-              <p>Capture bugs, assign owners, update status, and keep every project visible in one place.</p>
-            </div>
-            <div class="info-box">
-              <strong>Projects And Teams</strong>
-              <p>Manage multiple teams and projects with roles, permissions, and clean collaboration flows.</p>
-            </div>
-            <div class="info-box">
-              <strong>Reports And Export</strong>
-              <p>Generate dashboards, HTML reports, and structured exports whenever you need stakeholder visibility.</p>
-            </div>
-            <div class="info-box">
-              <strong>Flexible Plans</strong>
-              <p>Start free, upgrade when your team grows, and switch plans later from inside the app.</p>
-            </div>
+          <div class="actions" style="justify-content:flex-start;">
+            <a class="btn btn-primary" href="/login">Get Started</a>
+            <a class="btn" href="#plans">See Plans</a>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="plans">
+    <section class="section" id="plans">
       <div class="section-head">
-        <div>
-          <h2>Simple pricing that scales with your team</h2>
-          <p>Choose a plan that fits today, then move up or down later from inside the app.</p>
-        </div>
+        <h2>Simple pricing that scales with your team</h2>
+        <p>Choose a plan that fits today, then move up or down later from inside the app.</p>
       </div>
       <div class="plans">
         <article class="plan">
