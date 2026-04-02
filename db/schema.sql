@@ -9,8 +9,12 @@ CREATE TABLE IF NOT EXISTS organizations (
   name        TEXT        NOT NULL,
   slug        TEXT        NOT NULL UNIQUE,   -- e.g. "acme-corp"
   color       TEXT        NOT NULL DEFAULT '#6366f1',
+  logo        TEXT        NOT NULL DEFAULT '',
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS logo TEXT NOT NULL DEFAULT '';
 
 -- ── users ──────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (

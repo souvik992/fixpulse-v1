@@ -61,7 +61,7 @@ const resolveIssueUser = (bug, users, idKey, metadataLabels) => {
   const user = bug?.[idKey] ? users.find(u => u.id === bug[idKey]) : null;
   if (user) return user;
   const fallbackName = getFirstMetadataValue(bug?.description, Array.isArray(metadataLabels) ? metadataLabels : [metadataLabels]);
-  return fallbackName ? { name: fallbackName, avatar: getInitials(fallbackName), color: '#64748b' } : null;
+  return fallbackName ? { name: fallbackName, avatar: '', color: '#64748b' } : null;
 };
 const renderCompactStatusPills = stats => Object.entries(stats.byStatus || {})
   .map(([label, count]) => `<div class="pill"><span>${escapeHtml(label)}</span><strong>${count}</strong></div>`)
@@ -76,6 +76,28 @@ const renderPriorityBars = stats => {
     </div>
   `).join('');
 };
+const REPORT_FILTER_DEFAULTS = { startDate:'', endDate:'', assigneeId:'', priority:'', status:'', type:'' };
+const matchesReportFilters = (bug, filters) => {
+  const createdAt = getIssueCreatedDate(bug);
+  if (filters.startDate || filters.endDate) {
+    if (!createdAt) return false;
+    const createdDate = new Date(createdAt);
+    if (filters.startDate && createdDate < new Date(`${filters.startDate}T00:00:00`)) return false;
+    if (filters.endDate && createdDate > new Date(`${filters.endDate}T23:59:59.999`)) return false;
+  }
+  if (filters.assigneeId && (bug.assigneeId || '') !== filters.assigneeId) return false;
+  if (filters.priority && bug.priority !== filters.priority) return false;
+  if (filters.status && bug.status !== filters.status) return false;
+  if (filters.type && bug.type !== filters.type) return false;
+  return true;
+};
+const summarizeBugs = bugs => ({
+  total: bugs.length,
+  openCount: bugs.filter(b => b.status !== 'Done').length,
+  doneCount: bugs.filter(b => b.status === 'Done').length,
+  byPriority: ['Critical','High','Medium','Low'].reduce((acc, label) => ({ ...acc, [label]: bugs.filter(b => b.priority === label).length }), {}),
+  byStatus: ['To Do','In Progress','In Review','Done'].reduce((acc, label) => ({ ...acc, [label]: bugs.filter(b => b.status === label).length }), {}),
+});
 const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) => {
   const rows = bugs.map(bug => {
     const assignee = resolveIssueUser(bug, users, 'assigneeId', ['Assignee(s)', 'Assignee From Sheet']);
@@ -85,9 +107,10 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
         <td class="issuetype">${escapeHtml(bug.type || 'Bug')}</td>
         <td class="issuekey"><a class="issue-link" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bug.key || '')}</a></td>
         <td class="summary"><p>${escapeHtml(bug.title)}</p></td>
+        <td class="created">${escapeHtml(formatIssueCreatedDate(bug))}</td>
         <td class="priority">${escapeHtml(bug.priority || 'Medium')}</td>
         <td class="assignee">${escapeHtml(assignee?.name || 'Unassigned')}</td>
-        <td class="status"><span class="status-lozenge">${escapeHtml(bug.status || 'To Do')}</span></td>
+        <td class="status">${escapeHtml(bug.status || 'To Do')}</td>
       </tr>
     `;
   }).join('');
@@ -96,7 +119,7 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Jira</title>
+  <title>${escapeHtml(project.name)} - Bug List</title>
   <meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8">
   <style>
     table { mso-displayed-decimal-separator:"\\."; mso-displayed-thousand-separator:"\\,"; }
@@ -115,32 +138,23 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
     td { vertical-align:top; }
     a { color:#2a5db0; text-decoration:none; }
     .summary p { margin:0; }
-    .status-lozenge {
-      display:inline-block;
-      padding:2px 8px;
-      border-radius:12px;
-      background:#dfe1e6;
-      color:#172b4d;
-      font-size:11px;
-      font-weight:700;
-    }
     .report-link { margin: 6px 0; display:inline-block; }
   </style>
 </head>
 <body>
   <table border="1">
     <tr bgcolor="#205081" height="30">
-      <td colspan="6">
-        <img src="${escapeHtml(window.location.origin + BRAND_LOGO)}" width="57" height="30" border="0" alt="Jira">
+      <td colspan="7" style="padding:4px 8px;">
+        <img src="${escapeHtml(window.location.origin + BRAND_LOGO)}" alt="Jira" style="display:block;width:64px;height:32px;object-fit:contain;background:#fff;border-radius:4px;padding:2px;">
       </td>
     </tr>
     <tr>
-      <td colspan="6">
-        <a class="report-link" href="${escapeHtml(window.location.origin)}">${escapeHtml(project.name)} Report</a>
+      <td colspan="7">
+        <a class="report-link" href="${escapeHtml(window.location.origin)}">${escapeHtml(project.name)} - Bug List</a>
       </td>
     </tr>
     <tr>
-      <td colspan="6">
+      <td colspan="7">
         Displaying <strong>${bugs.length}</strong> issues at <strong>${escapeHtml(new Date(generatedAt).toLocaleString('en-GB'))}</strong>.
       </td>
     </tr>
@@ -160,6 +174,7 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
         <th>Issue Type</th>
         <th>Key</th>
         <th>Summary</th>
+        <th>Creation Date</th>
         <th>Priority</th>
         <th>Assignee</th>
         <th>Status</th>
@@ -211,20 +226,21 @@ function Toast({ toasts, dismiss }) {
 
 // ── Avatar ─────────────────────────────────────────────────────────────────────
 function Avatar({ user, size='' }) {
-  if (!user) return <div className={`avatar avatar-${size||'sm'}`} style={{background:'#475569'}}>?</div>;
+  const cls = `avatar ${size==='xs'?'avatar-xs':size==='sm'?'avatar-sm':''}`;
+  if (!user) return <div className={cls} style={{background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--muted)'}}>👤</div>;
   if (user.avatar && user.avatar.startsWith('data:image/')) {
-    return <img src={user.avatar} alt={user.name} className={`avatar ${size==='xs'?'avatar-xs':size==='sm'?'avatar-sm':''}`} style={{background:user.color||'#6366f1'}} title={user.name} />;
+    return <img src={user.avatar} alt={user.name} className={cls} style={{background:'var(--surface2)',border:'1px solid var(--border)'}} title={user.name} />;
   }
-  return <div className={`avatar ${size==='xs'?'avatar-xs':size==='sm'?'avatar-sm':''}`} style={{background:user.color||'#6366f1'}} title={user.name}>{user.avatar}</div>; // user.avatar is initials
+  return <div className={cls} style={{background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--muted)'}} title={user.name}>👤</div>;
 }
 
 function PriorityBadge({ p }) { return <span className={`badge ${priorityBadge(p)}`}>{priorityIcon(p)} {p}</span>; }
 function StatusBadge({ s })   { return <span className={`badge ${statusBadge(s)}`}>{statusIcon(s)} {s}</span>; }
 function TypeBadge({ t })     { return <span className={`badge ${typeBadge(t)}`}>{typeIcon(t)} {t}</span>; }
-function BrandLogo({ size=48, rounded=12, style={} }) {
+function BrandLogo({ src=BRAND_LOGO, size=48, rounded=12, style={} }) {
   return (
     <img
-      src={BRAND_LOGO}
+      src={src}
       alt="FixPulse logo"
       style={{
         width:size,
@@ -255,6 +271,7 @@ function AuthPage({ onAuth }) {
   const [mode, setMode]       = useState(initialToken ? 'reset-password' : 'landing'); // 'landing' | 'login' | 'register' | 'forgot-password' | 'reset-password' | 'reset-done'
   const [form, setForm]       = useState({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1', resetToken: initialToken });
   const [avatarFile, setAvatarFile] = useState(null);
+  const [orgLogoFile, setOrgLogoFile] = useState(null);
   const [error, setError]     = useState('');
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw]   = useState(false);
@@ -303,9 +320,10 @@ function AuthPage({ onAuth }) {
     try {
       const url  = mode==='login' ? '/api/auth/login' : '/api/auth/register-company';
       const avatarDataUrl = avatarFile ? await readImageAsDataUrl(avatarFile) : null;
+      const orgLogoDataUrl = orgLogoFile ? await readImageAsDataUrl(orgLogoFile) : null;
       const body = mode === 'login'
         ? { email: form.email, password: form.password }
-        : { companyName: form.companyName, name: form.name, email: form.email, password: form.password, color: form.color, avatarDataUrl };
+        : { companyName: form.companyName, name: form.name, email: form.email, password: form.password, color: form.color, avatarDataUrl, orgLogoDataUrl };
       const res  = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       const data = await res.json();
       if (!res.ok) { setError(data.error||'Something went wrong'); setLoading(false); return; }
@@ -315,7 +333,13 @@ function AuthPage({ onAuth }) {
     setLoading(false);
   };
 
-  const reset = m => { setMode(m); setError(''); setForm({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1', resetToken:'' }); };
+  const reset = m => {
+    setMode(m);
+    setError('');
+    setAvatarFile(null);
+    setOrgLogoFile(null);
+    setForm({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1', resetToken:'' });
+  };
   
   // ── Landing ──
   if (mode === 'landing') return (
@@ -358,6 +382,12 @@ function AuthPage({ onAuth }) {
             )}
             {mode === 'register' && (
               <div className="form-group">
+                <label className="form-label">Company Photo or Logo (optional)</label>
+                <input className="form-input" type="file" accept="image/*" onChange={e => setOrgLogoFile(e.target.files?.[0] || null)} />
+              </div>
+            )}
+            {mode === 'register' && (
+              <div className="form-group">
                 <label className="form-label">Your Full Name *</label>
                 <input className="form-input" value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Jane Doe" required />
               </div>
@@ -381,7 +411,7 @@ function AuthPage({ onAuth }) {
             )}
             {mode === 'register' && (
               <div className="form-group">
-                <label className="form-label">Your Avatar Colour</label>
+                <label className="form-label">Accent Colour</label>
                 <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                   {COLORS.map(c=>(
                     <div key={c} onClick={()=>set('color',c)} style={{ width:26,height:26,borderRadius:'50%',background:c,cursor:'pointer', border: form.color===c?'3px solid #fff':'3px solid transparent', transform: form.color===c?'scale(1.2)':'none', transition:'all .15s' }} />
@@ -390,7 +420,7 @@ function AuthPage({ onAuth }) {
               </div>
             )}
             {mode === 'register' && (
-              <div className="form-group"><label className="form-label">Your Avatar Image (optional)</label>
+              <div className="form-group"><label className="form-label">Profile Photo (optional)</label>
                 <input className="form-input" type="file" accept="image/*" onChange={e => setAvatarFile(e.target.files?.[0])} /></div>
             )}
             {error && (
@@ -699,14 +729,20 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
   const [stats,setStats]=useState(null);
   const [recentBugs,setRecentBugs]=useState([]);
   const [selectedBug,setSelectedBug]=useState(null);
+  const [showExportFilters,setShowExportFilters]=useState(false);
+  const [exportFilters,setExportFilters]=useState(REPORT_FILTER_DEFAULTS);
   const lineRef=useRef(null),doughnutRef=useRef(null),barRef=useRef(null);
   const lineChart=useRef(null),doughnutChart=useRef(null),barChart=useRef(null);
   useEffect(()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; api.get(url).then(setStats); const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; api.get(bu).then(b=>setRecentBugs(b.slice(0,5))); },[currentProject]);
-  const exportReport = async () => {
+  const setExportFilter = (k,v) => setExportFilters(f=>({...f,[k]:v}));
+  const openExportModal = () => {
     if (!currentProject) {
       toast('Select a project first to export its report', 'info');
       return;
     }
+    setShowExportFilters(true);
+  };
+  const exportReport = async () => {
     const popup = window.open('', '_blank');
     if (!popup) {
       toast('Allow pop-ups to open the HTML report', 'error');
@@ -718,10 +754,11 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         api.get(`/api/stats?projectId=${currentProject.id}`),
         api.get(`/api/bugs?projectId=${currentProject.id}`),
       ]);
+      const filteredBugs = reportBugs.filter(bug => matchesReportFilters(bug, exportFilters));
       const html = buildProjectReportHtml({
         project: currentProject,
-        stats: reportStats,
-        bugs: reportBugs,
+        stats: { ...reportStats, ...summarizeBugs(filteredBugs) },
+        bugs: filteredBugs,
         users,
         generatedAt: Date.now(),
       });
@@ -729,6 +766,7 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
       const reportUrl = URL.createObjectURL(blob);
       popup.location.href = reportUrl;
       setTimeout(() => URL.revokeObjectURL(reportUrl), 60000);
+      setShowExportFilters(false);
       toast('Project report opened in a new tab', 'success');
     } catch (error) {
       popup.close();
@@ -755,7 +793,7 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
   );
   return (
     <div>
-      <div className="page-header"><div><h1>Dashboard</h1><p>{currentProject?currentProject.name:'All Projects'} · Overview</p></div><div style={{display:'flex',gap:10,flexWrap:'wrap'}}><button className="btn btn-ghost" onClick={exportReport}>Export Report</button><button className="btn btn-primary" onClick={()=>onNavigate('list')}>View All Issues →</button></div></div>
+      <div className="page-header"><div><h1>Dashboard</h1><p>{currentProject?currentProject.name:'All Projects'} · Overview</p></div><div style={{display:'flex',gap:10,flexWrap:'wrap'}}><button className="btn btn-ghost" onClick={openExportModal}>Export Report</button><button className="btn btn-primary" onClick={()=>onNavigate('list')}>View All Issues →</button></div></div>
       <div className="stats-grid">
         {[{label:'Total Issues',value:stats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:stats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:stats.doneCount,sub:'marked as done',color:'#10b981'},{label:'Critical',value:stats.byPriority.Critical,sub:'critical priority',color:'#ef4444'}].map(card=>(
           <div key={card.label} className="stat-card"><div className="label">{card.label}</div><div className="value" style={{color:card.color}}>{card.value}</div><div className="sub">{card.sub}</div></div>
@@ -774,6 +812,26 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         )}
       </div>
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const nextStats = await api.get(url); setStats(nextStats); setSelectedBug(null); }}/>}
+      {showExportFilters&&(
+        <Modal onClose={()=>setShowExportFilters(false)}>
+          <div className="modal-header"><h2 className="modal-title">Export Report Filters</h2><button className="btn-icon" onClick={()=>setShowExportFilters(false)}>✕</button></div>
+          <div className="modal-body">
+            <div className="form-row">
+              <div className="form-group"><label className="form-label">Starting Date</label><input className="form-input" type="date" value={exportFilters.startDate} onChange={e=>setExportFilter('startDate',e.target.value)} /></div>
+              <div className="form-group"><label className="form-label">Ending Date</label><input className="form-input" type="date" value={exportFilters.endDate} onChange={e=>setExportFilter('endDate',e.target.value)} /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label className="form-label">Assignee</label><select className="form-select" value={exportFilters.assigneeId} onChange={e=>setExportFilter('assigneeId',e.target.value)}><option value="">All Assignees</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+              <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={exportFilters.priority} onChange={e=>setExportFilter('priority',e.target.value)}><option value="">All Priorities</option>{['Critical','High','Medium','Low'].map(p=><option key={p} value={p}>{p}</option>)}</select></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={exportFilters.status} onChange={e=>setExportFilter('status',e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s=><option key={s} value={s}>{s}</option>)}</select></div>
+              <div className="form-group"><label className="form-label">Issue Type</label><select className="form-select" value={exportFilters.type} onChange={e=>setExportFilter('type',e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+            </div>
+          </div>
+          <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={()=>setExportFilters(REPORT_FILTER_DEFAULTS)}>Reset</button><button type="button" className="btn btn-primary" onClick={exportReport}>Export</button></div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -881,7 +939,7 @@ function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
 }
 
 // ── TeamPage (multi-tenant, role-aware) ───────────────────────────────────────
-function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
+function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpdated }) {
   const isAdmin = currentUser?.role === 'admin';
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name:'', email:'', role:'developer', color:'#6366f1' }); // avatarDataUrl will be added to payload directly
@@ -914,6 +972,19 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
     if (res.error) { toast(res.error, 'error'); return; }
     setUsers(us => us.map(u => u.id === id ? { ...u, role } : u));
     toast('Role updated', 'success');
+  };
+
+  const updatePhoto = async (member, file) => {
+    if (!file) return;
+    const avatarDataUrl = await readImageAsDataUrl(file);
+    const isSelf = member.id === currentUser?.id;
+    const res = isSelf
+      ? await api.put('/api/auth/me/photo', { avatarDataUrl })
+      : await api.put(`/api/members/${member.id}`, { avatarDataUrl });
+    if (res.error) { toast(res.error, 'error'); return; }
+    setUsers(us => us.map(u => u.id === member.id ? res : u));
+    if (isSelf && onCurrentUserUpdated) onCurrentUserUpdated(res);
+    toast('Photo updated', 'success');
   };
 
   const removeMember = async id => {
@@ -958,7 +1029,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
             <div key={u.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,position:'relative'}}>
               {isSelf && <div style={{position:'absolute',top:12,right:12,fontSize:10,background:'var(--primary)',color:'#fff',padding:'2px 7px',borderRadius:99,fontWeight:600}}>YOU</div>}
               <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:14}}>
-                <div className="avatar" style={{width:44,height:44,fontSize:16,background:u.color,flexShrink:0}}>{u.avatar}</div>
+                <Avatar user={u} />
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.name}</div>
                   <div style={{fontSize:12,color:'var(--muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.email}</div>
@@ -994,6 +1065,14 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
                   <button className="btn btn-danger btn-sm" style={{fontSize:11}} onClick={()=>removeMember(u.id)}>Remove</button>
                 </div>
               )}
+              {(isAdmin || isSelf) && (
+                <div style={{marginTop:10}}>
+                  <label className="btn btn-ghost btn-sm" style={{fontSize:11,cursor:'pointer'}}>
+                    Upload Photo
+                    <input type="file" accept="image/*" style={{display:'none'}} onChange={e => { updatePhoto(u, e.target.files?.[0]); e.target.value = ''; }} />
+                  </label>
+                </div>
+              )}
             </div>
           );
         })}
@@ -1020,13 +1099,13 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">Avatar Colour</label>
+                <label className="form-label">Accent Colour</label>
                 <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                   {COLORS.map(c=><div key={c} onClick={()=>setF('color',c)} style={{width:24,height:24,borderRadius:'50%',background:c,cursor:'pointer',border:form.color===c?'3px solid #fff':'3px solid transparent',transform:form.color===c?'scale(1.2)':'none',transition:'all .15s'}}/>)}
                 </div>
               </div>
               <div className="form-group">
-                <label className="form-label">Avatar Image (optional)</label>
+                <label className="form-label">Profile Photo (optional)</label>
                 <input className="form-input" type="file" accept="image/*" onChange={e => setAvatarFile(e.target.files?.[0])} />
               </div>
               <div style={{background:'rgba(99,102,241,.08)',border:'1px solid rgba(99,102,241,.2)',borderRadius:8,padding:'10px 14px',fontSize:13,color:'var(--muted)'}}>
@@ -1101,14 +1180,21 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
 // ── SettingsPage (admin only) ─────────────────────────────────────────────────
 function SettingsPage({ org, setOrg, currentUser, toast }) {
   const [form, setForm] = useState({ name: org?.name||'', color: org?.color||'#6366f1' });
+  const [logoFile, setLogoFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const setF = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  useEffect(() => {
+    setForm({ name: org?.name||'', color: org?.color||'#6366f1' });
+  }, [org?.name, org?.color]);
 
   const save = async e => {
     e.preventDefault();
     setSaving(true);
-    const res = await api.put('/api/org', form);
+    const logoDataUrl = logoFile ? await readImageAsDataUrl(logoFile) : null;
+    const res = await api.put('/api/org', { ...form, logoDataUrl });
     if (res.error) { toast(res.error,'error'); } else { setOrg(res); toast('Settings saved','success'); }
+    setLogoFile(null);
     setSaving(false);
   };
 
@@ -1123,6 +1209,13 @@ function SettingsPage({ org, setOrg, currentUser, toast }) {
         <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:24}}>
           <h3 style={{fontSize:14,fontWeight:600,marginBottom:20}}>Organisation Details</h3>
           <form onSubmit={save}>
+            <div className="form-group">
+              <label className="form-label">Company Photo or Logo</label>
+              <div style={{display:'flex',alignItems:'center',gap:14}}>
+                <BrandLogo src={logoFile ? URL.createObjectURL(logoFile) : (org?.logo || BRAND_LOGO)} size={56} rounded={14} />
+                <input className="form-input" type="file" accept="image/*" onChange={e=>setLogoFile(e.target.files?.[0] || null)} />
+              </div>
+            </div>
             <div className="form-group">
               <label className="form-label">Company Name</label>
               <input className="form-input" value={form.name} onChange={e=>setF('name',e.target.value)} required />
@@ -1275,10 +1368,12 @@ function RolesPage({ users, currentUser, toast }) {
           </div>
 
           {/* Current roles for selected user */}
-          {selUser && (
+              {selUser && (
             <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16,marginBottom:12}}>
               <div style={{fontWeight:600,fontSize:13,marginBottom:10}}>
-                <div className="avatar" style={{width:24,height:24,fontSize:11,background:selUser.color,display:'inline-flex',verticalAlign:'middle',marginRight:8}}>{selUser.avatar}</div>
+                <span style={{display:'inline-flex',verticalAlign:'middle',marginRight:8}}>
+                  <Avatar user={selUser} size="xs" />
+                </span>
                 {selUser.name}'s Roles
               </div>
               {userRoles.length === 0 && <p style={{fontSize:12,color:'var(--muted)'}}>No roles assigned.</p>}
@@ -1495,7 +1590,7 @@ function App() {
         {/* Company / Logo header */}
         <div className="sidebar-logo" style={{flexDirection:'column',alignItems:'flex-start',gap:0,paddingBottom:14}}>
           <div style={{display:'flex',alignItems:'center',gap:10,width:'100%'}}>
-            <BrandLogo size={44} rounded={12} />
+            <BrandLogo src={authOrg?.logo || BRAND_LOGO} size={44} rounded={12} />
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{authOrg?.name||'FixPulse'}</div>
               <div style={{fontSize:10,color:'var(--muted)',marginTop:1}}>Bug Tracker</div>
@@ -1527,7 +1622,7 @@ function App() {
 
         <div className="sidebar-footer">
           <div className="user-badge" style={{marginBottom:10}}>
-            <div className="avatar" style={{background:authUser.color||'#6366f1'}}>{authUser.avatar||(authUser.name?.slice(0,2)||'?').toUpperCase()}</div>
+            <Avatar user={authUser} />
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{authUser.name}</div>
               <div style={{display:'flex',alignItems:'center',gap:4}}>
@@ -1559,7 +1654,7 @@ function App() {
                 <div key={u.id} className="online-member-avatar" style={{zIndex: onlineUsers.length - i}} title={u.name}>
                   {u.avatar && u.avatar.startsWith('data:image/')
                     ? <img src={u.avatar} alt={u.name} style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}} />
-                    : <span>{u.avatar || getInitials(u.name)}</span>}
+                    : <span>👤</span>}
                   <span className="online-dot"/>
                 </div>
               ))}
@@ -1576,7 +1671,7 @@ function App() {
               <span style={{fontSize:13,fontWeight:500}}>{authUser.name}</span>
               <span style={{fontSize:11,color:'var(--muted)'}}>{authOrg?.name}</span>
             </div>
-            <div className="avatar" style={{background:authUser.color||'#6366f1'}}>{authUser.avatar||(authUser.name?.slice(0,2)||'?').toUpperCase()}</div>
+            <Avatar user={authUser} />
           </div>
         </div>
 
@@ -1585,7 +1680,7 @@ function App() {
           {view==='board'     && <KanbanBoard projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
-          {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} toast={toast} currentUser={authUser}/>}
+          {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
           {view==='roles'     && <RolesPage users={users} currentUser={authUser} toast={toast}/>}
           {view==='settings'  && <SettingsPage org={authOrg} setOrg={setAuthOrg} currentUser={authUser} toast={toast}/>}
         </div>

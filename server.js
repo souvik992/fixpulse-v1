@@ -177,7 +177,7 @@ async function enforceIssueWritePermissions(req, bug, changes) {
 
 app.post('/api/auth/register-company', async (req, res) => {
   try {
-    const { companyName, name, email, password, color = '#6366f1', avatarDataUrl } = req.body;
+    const { companyName, name, email, password, color = '#6366f1', avatarDataUrl, orgLogoDataUrl } = req.body;
     if (!companyName || !name || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
@@ -185,9 +185,10 @@ app.post('/api/auth/register-company', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
     if (avatarDataUrl && !avatarDataUrl.startsWith('data:image/')) return res.status(400).json({ error: 'Invalid avatar data URL' });
+    if (orgLogoDataUrl && !orgLogoDataUrl.startsWith('data:image/')) return res.status(400).json({ error: 'Invalid organization logo data URL' });
 
     const hash = await bcrypt.hash(password, 10);
-    const avatar = avatarDataUrl || name.split(' ').map((word) => word[0]).join('').toUpperCase().slice(0, 2);
+    const avatar = avatarDataUrl || '';
     let slug = slugify(companyName);
 
     const existingOrg = await db.query('SELECT id FROM organizations WHERE slug=$1', [slug]);
@@ -203,8 +204,8 @@ app.post('/api/auth/register-company', async (req, res) => {
     const {
       rows: [org],
     } = await db.query(
-      'INSERT INTO organizations (name,slug,color) VALUES ($1,$2,$3) RETURNING *',
-      [companyName, slug, color]
+      'INSERT INTO organizations (name,slug,color,logo) VALUES ($1,$2,$3,$4) RETURNING *',
+      [companyName, slug, color, orgLogoDataUrl || '']
     );
 
     const {
@@ -235,7 +236,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const { rows } = await db.query(
-      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.email=$1',
+      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color,o.logo AS org_logo FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.email=$1',
       [email]
     );
 
@@ -252,7 +253,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const user = camel(row);
-    const org = { id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor };
+    const org = { id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor, logo: user.orgLogo || '' };
     const token = jwt.sign(
       { id: user.id, orgId: user.orgId, email: user.email, name: user.name, role: user.role },
       JWT_SECRET,
@@ -268,7 +269,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/me', auth, async (req, res) => {
   try {
     const { rows } = await db.query(
-      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.id=$1',
+      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color,o.logo AS org_logo FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.id=$1',
       [req.user.id]
     );
 
@@ -277,8 +278,27 @@ app.get('/api/auth/me', auth, async (req, res) => {
     }
 
     const user = camel(rows[0]);
-    const org = { id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor };
+    const org = { id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor, logo: user.orgLogo || '' };
     res.json({ user: strip(user), org });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/auth/me/photo', auth, async (req, res) => {
+  try {
+    const { avatarDataUrl } = req.body;
+    if (avatarDataUrl && !avatarDataUrl.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'Invalid avatar data URL' });
+    }
+    const { rows } = await db.query(
+      'UPDATE users SET avatar=COALESCE($1,avatar) WHERE id=$2 RETURNING *',
+      [avatarDataUrl, req.user.id]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    res.json(strip(camel(rows[0])));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -348,10 +368,13 @@ app.get('/api/org', auth, async (req, res) => {
 
 app.put('/api/org', auth, checkPermission(PERMISSIONS.CONFIGURE_WORKFLOW), async (req, res) => {
   try {
-    const { name, color } = req.body;
+    const { name, color, logoDataUrl } = req.body;
+    if (logoDataUrl && !logoDataUrl.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'Invalid organization logo data URL' });
+    }
     const { rows } = await db.query(
-      'UPDATE organizations SET name=$1,color=$2 WHERE id=$3 RETURNING *',
-      [name, color, req.user.orgId]
+      'UPDATE organizations SET name=$1,color=$2,logo=COALESCE($4,logo) WHERE id=$3 RETURNING *',
+      [name, color, req.user.orgId, logoDataUrl]
     );
     res.json(camel(rows[0]));
   } catch (error) {
@@ -383,7 +406,7 @@ app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async 
 
     const tempPassword = password || 'Welcome@123';
     const hash = await bcrypt.hash(tempPassword, 10);
-    const avatar = avatarDataUrl || name.split(' ').map((word) => word[0]).join('').toUpperCase().slice(0, 2);
+    const avatar = avatarDataUrl || '';
 
     const exists = await db.query('SELECT id FROM users WHERE email=$1', [email]);
     if (exists.rows.length) {
