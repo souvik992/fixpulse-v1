@@ -18,12 +18,16 @@ CREATE TABLE IF NOT EXISTS users (
   org_id        UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   name          TEXT        NOT NULL,
   email         TEXT        NOT NULL UNIQUE,
+  mobile_number TEXT,
   avatar        TEXT        NOT NULL,
   color         TEXT        NOT NULL DEFAULT '#6366f1',
   password_hash TEXT,
   role          TEXT        NOT NULL DEFAULT 'developer', -- admin | project_manager | developer | frontend_developer | backend_developer | tester | viewer | qa
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS mobile_number TEXT;
 
 -- ── projects ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS projects (
