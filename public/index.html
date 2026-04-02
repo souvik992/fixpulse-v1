@@ -84,11 +84,47 @@
     }
     .btn-primary:hover { background: var(--primary-strong); }
     .hero {
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 28px;
-      align-items: center;
-      padding: 40px 0 28px;
+      position: relative;
+      padding: 22px 0 34px;
+    }
+    .hero-banner {
+      position: relative;
+      min-height: 640px;
+      border-radius: 32px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(219, 228, 238, 0.9);
+      background: #dbe7ef;
+    }
+    .hero-banner::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(8, 15, 26, 0.68) 0%, rgba(8, 15, 26, 0.24) 48%, rgba(8, 15, 26, 0.08) 100%);
+    }
+    .hero-banner img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .hero-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 38px;
+    }
+    .hero-copy-box {
+      max-width: 520px;
+      background: rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      border-radius: 28px;
+      padding: 28px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.14);
     }
     .hero h1 {
       margin: 0 0 16px;
@@ -104,31 +140,35 @@
       font-size: 17px;
       max-width: 640px;
     }
-    .hero-panel {
-      background: rgba(255, 255, 255, 0.78);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(219, 228, 238, 0.9);
-      border-radius: 28px;
-      padding: 26px;
-      box-shadow: var(--shadow);
+    .hero-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      max-width: 660px;
+      align-self: flex-end;
     }
-    .hero-panel strong {
+    .info-box {
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.66);
+      border-radius: 22px;
+      padding: 18px 18px 16px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+    .info-box strong {
       display: block;
-      margin-bottom: 12px;
       font-size: 13px;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.1em;
       color: var(--primary-strong);
+      margin-bottom: 8px;
     }
-    .hero-stat {
-      display: flex;
-      justify-content: space-between;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--border);
+    .info-box p {
+      margin: 0;
       color: var(--muted);
+      line-height: 1.6;
+      font-size: 14px;
     }
-    .hero-stat:last-child { border-bottom: none; }
-    .hero-stat span:last-child { color: var(--text); font-weight: 700; }
     .section-head {
       display: flex;
       justify-content: space-between;
@@ -199,7 +239,14 @@
       color: var(--muted);
     }
     @media (max-width: 980px) {
-      .hero { grid-template-columns: 1fr; }
+      .hero-banner { min-height: 760px; }
+      .hero-overlay { padding: 22px; }
+      .hero-copy-box { max-width: 100%; }
+      .hero-stats-grid {
+        grid-template-columns: 1fr;
+        max-width: 100%;
+        align-self: stretch;
+      }
       .plans { grid-template-columns: 1fr; }
     }
   </style>
@@ -221,23 +268,39 @@
     </header>
 
     <section class="hero">
-      <div>
-        <h1>Clean bug tracking for teams that want clarity, not clutter.</h1>
-        <p>
-          FixPulse brings issues, ownership, exports, dashboards, and team workflows into one lightweight,
-          professional space. Start free, scale when your team grows, and keep the experience fast and simple.
-        </p>
-        <div class="nav-actions">
-          <a class="btn btn-primary" href="/login">Get Started</a>
-          <a class="btn" href="#plans">See Plans</a>
+      <div class="hero-banner">
+        <img src="/index-banner.png" alt="FixPulse banner" />
+        <div class="hero-overlay">
+          <div class="hero-copy-box">
+            <h1>Clean bug tracking for teams that want clarity, not clutter.</h1>
+            <p>
+              FixPulse brings issues, ownership, exports, dashboards, and team workflows into one lightweight,
+              professional space. Start free, scale when your team grows, and keep the experience fast and simple.
+            </p>
+            <div class="nav-actions">
+              <a class="btn btn-primary" href="/login">Get Started</a>
+              <a class="btn" href="#plans">See Plans</a>
+            </div>
+          </div>
+          <div class="hero-stats-grid">
+            <div class="info-box">
+              <strong>Issue Tracking</strong>
+              <p>Capture bugs, assign owners, update status, and keep every project visible in one place.</p>
+            </div>
+            <div class="info-box">
+              <strong>Projects And Teams</strong>
+              <p>Manage multiple teams and projects with roles, permissions, and clean collaboration flows.</p>
+            </div>
+            <div class="info-box">
+              <strong>Reports And Export</strong>
+              <p>Generate dashboards, HTML reports, and structured exports whenever you need stakeholder visibility.</p>
+            </div>
+            <div class="info-box">
+              <strong>Flexible Plans</strong>
+              <p>Start free, upgrade when your team grows, and switch plans later from inside the app.</p>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="hero-panel">
-        <strong>What You Get</strong>
-        <div class="hero-stat"><span>Issue tracking</span><span>Included</span></div>
-        <div class="hero-stat"><span>Projects and teams</span><span>Included</span></div>
-        <div class="hero-stat"><span>Reports and export</span><span>Included</span></div>
-        <div class="hero-stat"><span>Plan upgrade or downgrade</span><span>Included</span></div>
       </div>
     </section>
 
