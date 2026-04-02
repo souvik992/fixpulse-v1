@@ -574,9 +574,6 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         {recentBugs.length===0?<div className="text-muted text-sm">No issues found.</div>:(
           <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date</th><th>Issue Raised By</th><th>Issue Type</th><th>Issue Title</th><th>Assignee</th><th>Priority</th><th>Issue Status</th></tr></thead>
           <tbody>{recentBugs.map(bug=>{const assignee=users.find(u=>u.id===bug.assigneeId);const reporter=users.find(u=>u.id===bug.reporterId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatDate(bug.createdAt)}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td><span className="issue-title">{bug.title}</span></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td></tr>);})}</tbody></table></div>
-          <div className="table-scroll" style={{display:'none'}}><table className="bug-table"><thead><tr><th>Date</th><th>Issue Raised By</th><th>Issue Type</th><th>Issue Title</th><th>Assignee</th><th>Priority</th><th>Issue Status</th></tr></thead>
-          <tbody>{recentBugs.map(bug=>{const assignee=users.find(u=>u.id===bug.assigneeId);const reporter=users.find(u=>u.id===bug.reporterId);return(<tr key={bug.id} onClick={()=>setSelectedBug(bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><span className="text-muted text-sm">{timeAgo(bug.updatedAt)}</span></td></tr>);})}</tbody></table>
-          </div>
         )}
       </div>
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const nextStats = await api.get(url); setStats(nextStats); setSelectedBug(null); }}/>}
@@ -1238,7 +1235,10 @@ function App() {
     { id:'list',      label:'Issues',    icon:'🐛' },
     { id:'projects',  label:'Projects',  icon:'📁' },
     { id:'team',      label:'Team',      icon:'👥' },
-    ...(authUser?.role==='admin' ? [{ id:'settings', label:'Settings', icon:'⚙️' }] : []),
+    ...(authUser?.role==='admin' ? [
+      { id:'roles',    label:'Roles',     icon:'🔐' },
+      { id:'settings', label:'Settings',  icon:'⚙️' },
+    ] : []),
   ];
   const navigate = v => setView(v);
 
@@ -1342,6 +1342,7 @@ function App() {
           {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
           {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} toast={toast} currentUser={authUser}/>}
+          {view==='roles'     && <RolesPage users={users} currentUser={authUser} toast={toast}/>}
           {view==='settings'  && <SettingsPage org={authOrg} setOrg={setAuthOrg} currentUser={authUser} toast={toast}/>}
         </div>
       </main>
