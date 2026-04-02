@@ -732,7 +732,7 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
       toast('Select a project first to export its report', 'info');
       return;
     }
-    const popup = window.open('', '_blank', 'noopener,noreferrer');
+    const popup = window.open('', '_blank');
     if (!popup) {
       toast('Allow pop-ups to open the HTML report', 'error');
       return;
@@ -750,9 +750,10 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         users,
         generatedAt: Date.now(),
       });
-      popup.document.open();
-      popup.document.write(html);
-      popup.document.close();
+      const blob = new Blob([html], { type: 'text/html' });
+      const reportUrl = URL.createObjectURL(blob);
+      popup.location.href = reportUrl;
+      setTimeout(() => URL.revokeObjectURL(reportUrl), 60000);
       toast('Project report opened in a new tab', 'success');
     } catch (error) {
       popup.close();
