@@ -62,7 +62,6 @@ function Toast({ toasts, dismiss }) {
       {toasts.map(t => (
         <div key={t.id} className={`toast toast-${t.type}`} onClick={() => dismiss(t.id)}>
           <span>{t.type==='success'?'✓':t.type==='error'?'✗':'ℹ'}</span><span>{t.message}</span>
-          </div>
         </div>
       ))}
     </div>
