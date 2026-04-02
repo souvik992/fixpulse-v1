@@ -30,6 +30,7 @@ const typeIcon     = t => ({ Bug:'🐛', Feature:'✨', Task:'📋', Improvement
 const statusIcon   = s => ({ 'To Do':'○', 'In Progress':'◑', 'In Review':'◕', 'Done':'●' }[s]||'○');
 const timeAgo      = ts => { const d=Math.floor((Date.now()-new Date(ts))/1000); if(d<60)return 'just now'; if(d<3600)return `${Math.floor(d/60)}m ago`; if(d<86400)return `${Math.floor(d/3600)}h ago`; return `${Math.floor(d/86400)}d ago`; };
 const formatDate   = ts => ts ? new Date(ts).toLocaleDateString('en-GB') : '—';
+const formatDateTime = ts => ts ? new Date(ts).toLocaleString('en-GB') : 'Unavailable';
 const isSheetImportedBug = bug => bug?.sourceKind === 'google_sheet' || Boolean(getMetadataValue(bug?.description, 'Source Tab'));
 const getIssueCreatedDate = bug => isSheetImportedBug(bug) ? (bug?.sourceCreatedAt || null) : (bug?.createdAt || null);
 const formatIssueCreatedDate = bug => {
@@ -234,6 +235,41 @@ const ensureRazorpayLoaded = () => new Promise((resolve, reject) => {
 });
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
+function useSheetSyncStatus() {
+  const [syncStatus, setSyncStatus] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadStatus = async () => {
+      try {
+        const status = await api.get('/api/sheet-sync/status');
+        if (active && !status?.error) setSyncStatus(status);
+      } catch {}
+    };
+
+    loadStatus();
+    const timer = setInterval(loadStatus, 60000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  return syncStatus;
+}
+
+function SyncTimestamp() {
+  const syncStatus = useSheetSyncStatus();
+
+  return (
+    <div style={{marginLeft:'auto', textAlign:'right'}}>
+      <div style={{fontSize:11, fontWeight:600, color:'var(--text)', textTransform:'uppercase', letterSpacing:'0.04em'}}>Last Data Sync</div>
+      <div style={{fontSize:12, color:'var(--muted)'}}>{formatDateTime(syncStatus?.lastSuccessAt)}</div>
+    </div>
+  );
+}
+
 function Toast({ toasts, dismiss }) {
   return (
     <div className="toast-container">
@@ -817,7 +853,10 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         <div className="chart-card"><h3>By Priority</h3><div className="chart-wrap"><canvas ref={barRef}/></div></div>
       </div>
       <div className="table-card" style={{padding:20}}>
-        <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:16}}>Recent Issues</h3>
+        <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:16}}>
+          <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',margin:0}}>Recent Issues</h3>
+          <SyncTimestamp />
+        </div>
         {recentBugs.length===0?<div className="text-muted text-sm">No issues found.</div>:(
           <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th><th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
           <tbody>{recentBugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
@@ -870,6 +909,10 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
       </div>
       {bugs.length===0?<div className="empty-state"><div className="icon">🎉</div><h3>No issues found</h3><p>Try adjusting your filters or create a new issue.</p></div>:(
         <div className="table-card">
+          <div style={{display:'flex',alignItems:'flex-start',gap:12,padding:'16px 16px 0'}}>
+            <div style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Recent Issues</div>
+            <SyncTimestamp />
+          </div>
           <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th><th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
           <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
           <div className="table-scroll" style={{display:'none'}}><table className="bug-table"><thead><tr><th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Raised By</th><th>Project</th><th>Created</th></tr></thead>

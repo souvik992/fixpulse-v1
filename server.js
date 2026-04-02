@@ -1383,10 +1383,6 @@ app.get('/api/presence', auth, (req, res) => {
 
 app.get('/api/sheet-sync/status', auth, async (req, res) => {
   try {
-    const canManage = (await getScopedPermissions(req)).has(PERMISSIONS.MANAGE_PROJECT);
-    if (!canManage) {
-      return res.status(403).json({ error: 'Forbidden - MANAGE_PROJECT permission required' });
-    }
     res.json(getGoogleSheetSyncStatus());
   } catch (error) {
     res.status(500).json({ error: error.message });
