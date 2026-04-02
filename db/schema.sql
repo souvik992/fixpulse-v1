@@ -10,11 +10,17 @@ CREATE TABLE IF NOT EXISTS organizations (
   slug        TEXT        NOT NULL UNIQUE,   -- e.g. "acme-corp"
   color       TEXT        NOT NULL DEFAULT '#6366f1',
   logo        TEXT        NOT NULL DEFAULT '',
+  plan_code   TEXT        NOT NULL DEFAULT 'enterprise',
+  user_limit  INTEGER,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE organizations
   ADD COLUMN IF NOT EXISTS logo TEXT NOT NULL DEFAULT '';
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS plan_code TEXT NOT NULL DEFAULT 'enterprise';
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS user_limit INTEGER;
 
 -- ── users ──────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (

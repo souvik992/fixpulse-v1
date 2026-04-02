@@ -188,6 +188,11 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
 const COLORS       = ['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
 const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', frontend_developer:'Frontend Developer', backend_developer:'Backend Developer', tester:'QA', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Developer':'Developer', 'Frontend Developer':'Frontend Developer', 'Backend Developer':'Backend Developer', 'Tester':'QA', 'QA':'QA', 'Viewer':'Viewer' };
 const ROLE_COLORS  = { admin:'#ef4444', project_manager:'#f97316', developer:'#6366f1', frontend_developer:'#3b82f6', backend_developer:'#2563eb', tester:'#10b981', viewer:'#9ca3af', qa:'#10b981', 'Admin':'#ef4444', 'Project Manager':'#f97316', 'Developer':'#6366f1', 'Frontend Developer':'#3b82f6', 'Backend Developer':'#2563eb', 'Tester':'#10b981', 'Viewer':'#9ca3af' };
+const PLAN_OPTIONS = [
+  { code:'basic', name:'Basic', price:'Free', userLimit:10, blurb:'Good for small teams starting out.' },
+  { code:'plus', name:'Plus', price:'Rs 2,999 / month', userLimit:50, blurb:'Built for growing teams and active projects.' },
+  { code:'enterprise', name:'Enterprise', price:'Custom', userLimit:null, blurb:'Unlimited users with full flexibility.' },
+];
 const ALL_PERMISSIONS = ['CREATE_ISSUE','EDIT_ISSUE','DELETE_ISSUE','ASSIGN_ISSUE','CHANGE_STATUS','COMMENT','VIEW_ISSUE','VIEW_REPORTS','MANAGE_PROJECT','MANAGE_USERS','CONFIGURE_WORKFLOW'];
 
 const readFilesAsAttachments = files => Promise.all(
@@ -1178,10 +1183,11 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
 }
 
 // ── SettingsPage (admin only) ─────────────────────────────────────────────────
-function SettingsPage({ org, setOrg, currentUser, toast }) {
+function SettingsPage({ org, setOrg, currentUser, toast, users }) {
   const [form, setForm] = useState({ name: org?.name||'', color: org?.color||'#6366f1' });
   const [logoFile, setLogoFile] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [planSaving, setPlanSaving] = useState('');
   const setF = (k,v) => setForm(f=>({...f,[k]:v}));
 
   useEffect(() => {
@@ -1202,10 +1208,49 @@ function SettingsPage({ org, setOrg, currentUser, toast }) {
     <div className="empty-state"><div className="icon">🔒</div><h3>Admin Only</h3><p>Only admins can access company settings.</p></div>
   );
 
+  const changePlan = async planCode => {
+    setPlanSaving(planCode);
+    const res = await api.put('/api/org/plan', { planCode });
+    if (res.error) toast(res.error, 'error');
+    else { setOrg(res); toast(`${res.planName} plan activated`, 'success'); }
+    setPlanSaving('');
+  };
+
+  const currentUsers = users?.length || org?.currentUserCount || 0;
+
   return (
     <div>
       <div className="page-header"><div><h1>Company Settings</h1><p>Manage your organisation</p></div></div>
-      <div style={{maxWidth:480}}>
+      <div style={{maxWidth:960}}>
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:24,marginBottom:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'flex-start',marginBottom:18,flexWrap:'wrap'}}>
+            <div>
+              <h3 style={{fontSize:14,fontWeight:600,marginBottom:4}}>Plan & Billing</h3>
+              <p style={{fontSize:13,color:'var(--muted)'}}>Current plan: <strong>{org?.planName || 'Enterprise'}</strong> · {org?.userLimit===null?'Unlimited users':`${currentUsers}/${org?.userLimit} users used`}</p>
+            </div>
+            <button className="btn btn-ghost" onClick={()=>window.open('/pricing.html','_blank')}>View Pricing Page</button>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14}}>
+            {PLAN_OPTIONS.map(plan => {
+              const active = org?.planCode === plan.code;
+              const overLimit = plan.userLimit !== null && currentUsers > plan.userLimit;
+              return (
+                <div key={plan.code} style={{background:'var(--surface2)',border:`1px solid ${active?'var(--primary)':'var(--border)'}`,borderRadius:'var(--radius)',padding:18}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                    <strong>{plan.name}</strong>
+                    {active && <span style={{fontSize:11,fontWeight:700,color:'var(--primary)'}}>ACTIVE</span>}
+                  </div>
+                  <div style={{fontSize:22,fontWeight:700,marginBottom:6}}>{plan.price}</div>
+                  <div style={{fontSize:12,color:'var(--muted)',marginBottom:10}}>{plan.userLimit===null?'Unlimited users':`Up to ${plan.userLimit} users`}</div>
+                  <p style={{fontSize:12,color:'var(--muted)',lineHeight:1.5,marginBottom:14}}>{plan.blurb}</p>
+                  <button className="btn btn-primary btn-sm" disabled={active || overLimit || !!planSaving} onClick={()=>changePlan(plan.code)} style={{width:'100%',justifyContent:'center'}}>
+                    {active ? 'Current Plan' : overLimit ? 'Too Many Users' : planSaving===plan.code ? 'Updating…' : `Switch to ${plan.name}`}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
         <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:24}}>
           <h3 style={{fontSize:14,fontWeight:600,marginBottom:20}}>Organisation Details</h3>
           <form onSubmit={save}>
@@ -1738,7 +1783,7 @@ function App() {
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
           {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
           {view==='roles'     && <RolesPage users={users} currentUser={authUser} toast={toast}/>}
-          {view==='settings'  && <SettingsPage org={authOrg} setOrg={setAuthOrg} currentUser={authUser} toast={toast}/>}
+          {view==='settings'  && <SettingsPage org={authOrg} setOrg={setAuthOrg} currentUser={authUser} toast={toast} users={users}/>}
         </div>
       </main>
 

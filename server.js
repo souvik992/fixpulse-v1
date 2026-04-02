@@ -70,6 +70,42 @@ function slugify(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+const PLAN_DEFINITIONS = {
+  basic: { code: 'basic', name: 'Basic', userLimit: 10, priceLabel: 'Free' },
+  plus: { code: 'plus', name: 'Plus', userLimit: 50, priceLabel: '₹2,999/mo' },
+  enterprise: { code: 'enterprise', name: 'Enterprise', userLimit: null, priceLabel: 'Custom' },
+};
+const DEFAULT_PLAN_CODE = 'enterprise';
+
+function normalizePlan(planCode) {
+  return PLAN_DEFINITIONS[planCode] || PLAN_DEFINITIONS[DEFAULT_PLAN_CODE];
+}
+
+function buildOrgPayload(orgRow) {
+  const org = camel(orgRow);
+  const plan = normalizePlan(org.planCode);
+  return {
+    id: org.id,
+    name: org.name,
+    slug: org.slug,
+    color: org.color,
+    logo: org.logo || '',
+    planCode: plan.code,
+    planName: plan.name,
+    userLimit: plan.userLimit,
+    priceLabel: plan.priceLabel,
+    currentUserCount: org.currentUserCount ?? undefined,
+  };
+}
+
+async function getOrgPlanState(orgId) {
+  const { rows } = await db.query('SELECT id, plan_code, user_limit FROM organizations WHERE id=$1', [orgId]);
+  if (!rows.length) return null;
+  const row = camel(rows[0]);
+  const plan = normalizePlan(row.planCode);
+  return { planCode: plan.code, userLimit: row.userLimit ?? plan.userLimit };
+}
+
 function auth(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
@@ -204,8 +240,8 @@ app.post('/api/auth/register-company', async (req, res) => {
     const {
       rows: [org],
     } = await db.query(
-      'INSERT INTO organizations (name,slug,color,logo) VALUES ($1,$2,$3,$4) RETURNING *',
-      [companyName, slug, color, orgLogoDataUrl || '']
+      'INSERT INTO organizations (name,slug,color,logo,plan_code,user_limit) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [companyName, slug, color, orgLogoDataUrl || '', DEFAULT_PLAN_CODE, PLAN_DEFINITIONS[DEFAULT_PLAN_CODE].userLimit]
     );
 
     const {
@@ -222,7 +258,7 @@ app.post('/api/auth/register-company', async (req, res) => {
       { expiresIn: JWT_EXPIRES }
     );
 
-    res.status(201).json({ token, user: strip(camel(user)), org: camel(org) });
+    res.status(201).json({ token, user: strip(camel(user)), org: buildOrgPayload(org) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -236,7 +272,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const { rows } = await db.query(
-      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color,o.logo AS org_logo FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.email=$1',
+      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color,o.logo AS org_logo,o.plan_code AS org_plan_code,o.user_limit AS org_user_limit FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.email=$1',
       [email]
     );
 
@@ -253,7 +289,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const user = camel(row);
-    const org = { id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor, logo: user.orgLogo || '' };
+    const org = buildOrgPayload({ id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor, logo: user.orgLogo || '', plan_code: user.orgPlanCode, user_limit: user.orgUserLimit });
     const token = jwt.sign(
       { id: user.id, orgId: user.orgId, email: user.email, name: user.name, role: user.role },
       JWT_SECRET,
@@ -269,7 +305,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/me', auth, async (req, res) => {
   try {
     const { rows } = await db.query(
-      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color,o.logo AS org_logo FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.id=$1',
+      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color,o.logo AS org_logo,o.plan_code AS org_plan_code,o.user_limit AS org_user_limit FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.id=$1',
       [req.user.id]
     );
 
@@ -278,7 +314,7 @@ app.get('/api/auth/me', auth, async (req, res) => {
     }
 
     const user = camel(rows[0]);
-    const org = { id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor, logo: user.orgLogo || '' };
+    const org = buildOrgPayload({ id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor, logo: user.orgLogo || '', plan_code: user.orgPlanCode, user_limit: user.orgUserLimit });
     res.json({ user: strip(user), org });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -346,6 +382,10 @@ app.put('/api/auth/me/photo', auth, async (req, res) => {
 
 app.post('/api/auth/logout', (_, res) => res.json({ success: true }));
 
+app.get('/api/plans', auth, async (_req, res) => {
+  res.json(Object.values(PLAN_DEFINITIONS));
+});
+
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -399,8 +439,15 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
 app.get('/api/org', auth, async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT * FROM organizations WHERE id=$1', [req.user.orgId]);
-    res.json(camel(rows[0]));
+    const { rows } = await db.query(
+      `SELECT o.*, (
+         SELECT COUNT(*)::int FROM users u WHERE u.org_id = o.id
+       ) AS current_user_count
+       FROM organizations o
+       WHERE o.id=$1`,
+      [req.user.orgId]
+    );
+    res.json(buildOrgPayload(rows[0]));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -419,7 +466,41 @@ app.put('/api/org', auth, async (req, res) => {
       'UPDATE organizations SET name=$1,color=$2,logo=COALESCE($4,logo) WHERE id=$3 RETURNING *',
       [name, color, req.user.orgId, logoDataUrl]
     );
-    res.json(camel(rows[0]));
+    res.json(buildOrgPayload(rows[0]));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/org/plan', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    if (!PLAN_DEFINITIONS[req.body.planCode]) {
+      return res.status(400).json({ error: 'Unsupported plan' });
+    }
+    const nextPlan = normalizePlan(req.body.planCode);
+    const { rows: counts } = await db.query('SELECT COUNT(*)::int AS count FROM users WHERE org_id=$1', [req.user.orgId]);
+    const currentUserCount = counts[0]?.count || 0;
+    if (nextPlan.userLimit !== null && currentUserCount > nextPlan.userLimit) {
+      return res.status(400).json({ error: `Cannot switch to ${nextPlan.name}. Current team size is ${currentUserCount}, but this plan allows only ${nextPlan.userLimit} users.` });
+    }
+    await db.query(
+      `UPDATE organizations
+       SET plan_code=$1, user_limit=$2
+       WHERE id=$3`,
+      [nextPlan.code, nextPlan.userLimit, req.user.orgId]
+    );
+    const { rows } = await db.query(
+      `SELECT o.*, (
+         SELECT COUNT(*)::int FROM users u WHERE u.org_id = o.id
+       ) AS current_user_count
+       FROM organizations o
+       WHERE o.id=$1`,
+      [req.user.orgId]
+    );
+    res.json(buildOrgPayload(rows[0]));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -450,6 +531,13 @@ app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async 
     const tempPassword = password || 'Welcome@123';
     const hash = await bcrypt.hash(tempPassword, 10);
     const avatar = avatarDataUrl || '';
+
+    const planState = await getOrgPlanState(req.user.orgId);
+    const { rows: countRows } = await db.query('SELECT COUNT(*)::int AS count FROM users WHERE org_id=$1', [req.user.orgId]);
+    const currentUserCount = countRows[0]?.count || 0;
+    if (planState?.userLimit !== null && currentUserCount >= planState.userLimit) {
+      return res.status(403).json({ error: `User limit reached for your ${normalizePlan(planState.planCode).name} plan. Upgrade to add more members.` });
+    }
 
     const exists = await db.query('SELECT id FROM users WHERE email=$1', [email]);
     if (exists.rows.length) {
