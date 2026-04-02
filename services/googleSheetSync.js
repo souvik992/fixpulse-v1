@@ -167,6 +167,16 @@ function cleanValue(value) {
   return text;
 }
 
+function normalizeMatchText(value) {
+  return cleanValue(value).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function getDescriptionMetadataValue(description, label) {
+  const prefix = `${label}:`;
+  const line = String(description || '').split('\n').find((entry) => entry.startsWith(prefix));
+  return line ? line.slice(prefix.length).trim() : '';
+}
+
 function normalizeHeader(value) {
   return cleanValue(value)
     .toLowerCase()
@@ -562,23 +572,35 @@ async function syncOnce() {
     const org = await getTargetOrg();
     if (!org) throw new Error(`Organization "${TARGET_ORG_NAME}" not found`);
 
-    const syncPath = path.join(process.cwd(), 'data', 'live-sheet-sync.xlsx');
+    const syncPath = path.join(process.cwd(), 'data', `live-sheet-sync-${process.pid}-${Date.now()}.xlsx`);
     await download(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=xlsx`, syncPath);
     const workbook = parseWorkbookViaPowerShell(syncPath);
+    try { fs.unlinkSync(syncPath); } catch {}
     const sheets = normalizeWorkbook(workbook);
 
     const [{ rows: projectRows }, { rows: userRows }, { rows: allEmailsRows }, { rows: bugRows }] = await Promise.all([
       db.query('SELECT * FROM projects WHERE org_id=$1 ORDER BY created_at ASC', [org.id]),
       db.query('SELECT * FROM users WHERE org_id=$1 ORDER BY created_at ASC', [org.id]),
       db.query('SELECT email FROM users'),
-      db.query('SELECT id, source_ref, source_hash FROM bugs WHERE org_id=$1 AND source_kind=$2', [org.id, 'google_sheet']),
+      db.query('SELECT id, key, project_id, title, description, source_kind, source_ref, source_hash FROM bugs WHERE org_id=$1', [org.id]),
     ]);
 
     const projectByName = new Map(projectRows.map((row) => [row.name.toLowerCase(), row]));
     const usedKeys = new Set(projectRows.map((row) => String(row.key).toUpperCase()));
     const userByName = new Map(userRows.map((row) => [String(row.name).toLowerCase(), row]));
     const usedEmails = new Set(allEmailsRows.map((row) => String(row.email || '').toLowerCase()).filter(Boolean));
-    const existingBySourceRef = new Map(bugRows.map((row) => [row.source_ref, row]));
+    const existingBySourceRef = new Map(
+      bugRows
+        .filter((row) => row.source_kind === 'google_sheet' && row.source_ref)
+        .map((row) => [row.source_ref, row])
+    );
+    const legacyByProjectAndTitle = new Map();
+    for (const row of bugRows) {
+      if (row.source_ref || !getDescriptionMetadataValue(row.description, 'Source Tab')) continue;
+      const key = `${row.project_id}::${normalizeMatchText(row.title)}`;
+      if (!legacyByProjectAndTitle.has(key)) legacyByProjectAndTitle.set(key, []);
+      legacyByProjectAndTitle.get(key).push(row);
+    }
     const developerRoleId = await getSystemRoleId('developer');
 
     let created = 0;
@@ -592,6 +614,56 @@ async function syncOnce() {
         const reporter = issue.reporterName ? await ensureUser(org, issue.reporterName, userByName, usedEmails, developerRoleId) : null;
         const sourceHash = hashIssue(issue);
         const existing = existingBySourceRef.get(issue.sourceRef);
+        const legacyKey = `${project.id}::${normalizeMatchText(issue.title)}`;
+        const legacyMatches = legacyByProjectAndTitle.get(legacyKey) || [];
+        const legacy = !existing && legacyMatches.length ? legacyMatches.shift() : null;
+
+        if (!existing && legacy) {
+          await db.query(
+            `UPDATE bugs
+             SET title=$2,
+                 description=$3,
+                 type=$4,
+                 priority=$5,
+                 status=$6,
+                 assignee_id=$7,
+                 reporter_id=$8,
+                 labels=$9,
+                 reference_link=$10,
+                 curl_command=$11,
+                 project_id=$12,
+                 source_kind='google_sheet',
+                 source_ref=$13,
+                 source_hash=$14,
+                 source_created_at=$15,
+                 created_at=COALESCE($15, created_at)
+             WHERE id=$1`,
+            [
+              legacy.id,
+              issue.title,
+              issue.description,
+              issue.type,
+              issue.priority,
+              issue.status,
+              assignee?.id || null,
+              reporter?.id || null,
+              issue.labels,
+              issue.referenceLink,
+              issue.curlCommand,
+              project.id,
+              issue.sourceRef,
+              sourceHash,
+              issue.sourceCreatedAt,
+            ]
+          );
+          existingBySourceRef.set(issue.sourceRef, {
+            id: legacy.id,
+            source_ref: issue.sourceRef,
+            source_hash: sourceHash,
+          });
+          updated += 1;
+          continue;
+        }
 
         if (!existing) {
           const key = await nextBugKey(project);
