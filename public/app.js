@@ -1,5 +1,6 @@
 const { useState, useEffect, useRef, useCallback } = React;
 const API = '';
+const BRAND_LOGO = '/fixpulse-logo.png';
 
 // ── Token storage ──────────────────────────────────────────────────────────────
 const Token = {
@@ -100,6 +101,22 @@ function Avatar({ user, size='' }) {
 function PriorityBadge({ p }) { return <span className={`badge ${priorityBadge(p)}`}>{priorityIcon(p)} {p}</span>; }
 function StatusBadge({ s })   { return <span className={`badge ${statusBadge(s)}`}>{statusIcon(s)} {s}</span>; }
 function TypeBadge({ t })     { return <span className={`badge ${typeBadge(t)}`}>{typeIcon(t)} {t}</span>; }
+function BrandLogo({ size=48, rounded=12, style={} }) {
+  return (
+    <img
+      src={BRAND_LOGO}
+      alt="FixPulse logo"
+      style={{
+        width:size,
+        height:size,
+        borderRadius:rounded,
+        objectFit:'cover',
+        display:'block',
+        ...style,
+      }}
+    />
+  );
+}
 
 function Modal({ children, onClose, large }) {
   useEffect(() => { const esc=e=>{if(e.key==='Escape')onClose();}; document.addEventListener('keydown',esc); return ()=>document.removeEventListener('keydown',esc); },[]);
@@ -184,8 +201,8 @@ function AuthPage({ onAuth }) {
   if (mode === 'landing') return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
       <div style={{ width:'100%', maxWidth:480, textAlign:'center' }}>
-        <div style={{ width:60, height:60, background:'var(--primary)', borderRadius:16, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:24, fontWeight:800, color:'#fff', marginBottom:16 }}>BT</div>
-        <h1 style={{ fontSize:28, fontWeight:800, marginBottom:8 }}>BugTracker</h1>
+        <BrandLogo size={84} rounded={20} style={{ margin:'0 auto 16px' }} />
+        <h1 style={{ fontSize:28, fontWeight:800, marginBottom:8 }}>FixPulse</h1>
         <p style={{ color:'var(--muted)', fontSize:15, marginBottom:40 }}>Professional bug &amp; issue tracking for your team</p>
         <div style={{ display:'flex', flexDirection:'column', gap:12, maxWidth:320, margin:'0 auto' }}>
           <button className="btn btn-primary" style={{ justifyContent:'center', padding:'14px 0', fontSize:15, borderRadius:10 }} onClick={()=>setMode('login')}>
@@ -206,7 +223,7 @@ function AuthPage({ onAuth }) {
       <div style={{ width:'100%', maxWidth: mode==='register' ? 480 : 420 }}>
         {/* Logo */}
         <div style={{ textAlign:'center', marginBottom:28 }}>
-          <div style={{ width:48, height:48, background:'var(--primary)', borderRadius:12, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:800, color:'#fff', marginBottom:10 }}>BT</div>
+          <BrandLogo size={64} rounded={16} style={{ margin:'0 auto 10px' }} />
           <h1 style={{ fontSize:20, fontWeight:700 }}>{mode==='login' ? 'Welcome back' : 'Register your Company'}</h1>
           <p style={{ color:'var(--muted)', fontSize:13, marginTop:4 }}>{mode==='login' ? 'Log in to your company workspace' : 'Create a workspace for your team'}</p>
         </div>
@@ -268,7 +285,7 @@ function AuthPage({ onAuth }) {
 
           <div style={{ textAlign:'center', marginTop:16, fontSize:12, color:'var(--muted)' }}>
             {mode==='login' ? (
-              <span>New to BugTracker? <span style={{ color:'var(--primary)', cursor:'pointer', fontWeight:600 }} onClick={()=>reset('register')}>Register your company →</span></span>
+              <span>New to FixPulse? <span style={{ color:'var(--primary)', cursor:'pointer', fontWeight:600 }} onClick={()=>reset('register')}>Register your company →</span></span>
             ) : (
               <span>Already have a workspace? <span style={{ color:'var(--primary)', cursor:'pointer', fontWeight:600 }} onClick={()=>reset('login')}>Log in →</span></span>
             )}
@@ -291,7 +308,7 @@ function AuthPage({ onAuth }) {
     <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
       <div style={{ width:'100%', maxWidth:420 }}>
         <div style={{ textAlign:'center', marginBottom:28 }}>
-          <div style={{ width:48, height:48, background:'var(--primary)', borderRadius:12, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:800, color:'#fff', marginBottom:10 }}>BT</div>
+          <BrandLogo size={64} rounded={16} style={{ margin:'0 auto 10px' }} />
           <h1 style={{ fontSize:20, fontWeight:700 }}>Forgot Password</h1>
           <p style={{ color:'var(--muted)', fontSize:13, marginTop:4 }}>Enter your email and we'll send you a reset link</p>
         </div>
@@ -331,7 +348,7 @@ function AuthPage({ onAuth }) {
     <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
       <div style={{ width:'100%', maxWidth:420 }}>
         <div style={{ textAlign:'center', marginBottom:28 }}>
-          <div style={{ width:48, height:48, background:'var(--primary)', borderRadius:12, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:800, color:'#fff', marginBottom:10 }}>BT</div>
+          <BrandLogo size={64} rounded={16} style={{ margin:'0 auto 10px' }} />
           <h1 style={{ fontSize:20, fontWeight:700 }}>Set New Password</h1>
           <p style={{ color:'var(--muted)', fontSize:13, marginTop:4 }}>Choose a strong password for your account</p>
         </div>
@@ -1286,9 +1303,9 @@ function App() {
         {/* Company / Logo header */}
         <div className="sidebar-logo" style={{flexDirection:'column',alignItems:'flex-start',gap:0,paddingBottom:14}}>
           <div style={{display:'flex',alignItems:'center',gap:10,width:'100%'}}>
-            <div className="logo-icon" style={{background:orgColor}}>{(authOrg?.name||'BT').slice(0,2).toUpperCase()}</div>
+            <BrandLogo size={44} rounded={12} />
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{authOrg?.name||'BugTracker'}</div>
+              <div style={{fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{authOrg?.name||'FixPulse'}</div>
               <div style={{fontSize:10,color:'var(--muted)',marginTop:1}}>Bug Tracker</div>
             </div>
           </div>
