@@ -73,7 +73,7 @@ function slugify(value) {
 }
 
 const PLAN_DEFINITIONS = {
-  basic: { code: 'basic', name: 'Basic', userLimit: 10, priceLabel: 'Free', amountPaise: 0 },
+  basic: { code: 'basic', name: 'Basic', userLimit: 10, priceLabel: 'Free / month', amountPaise: 0 },
   plus: { code: 'plus', name: 'Plus', userLimit: 50, priceLabel: 'Rs 2,999 / month', amountPaise: 299900 },
   enterprise: { code: 'enterprise', name: 'Enterprise', userLimit: null, priceLabel: 'Rs 9,999 / month', amountPaise: 999900 },
 };
