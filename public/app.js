@@ -30,6 +30,13 @@ const typeIcon     = t => ({ Bug:'🐛', Feature:'✨', Task:'📋', Improvement
 const statusIcon   = s => ({ 'To Do':'○', 'In Progress':'◑', 'In Review':'◕', 'Done':'●' }[s]||'○');
 const timeAgo      = ts => { const d=Math.floor((Date.now()-new Date(ts))/1000); if(d<60)return 'just now'; if(d<3600)return `${Math.floor(d/60)}m ago`; if(d<86400)return `${Math.floor(d/3600)}h ago`; return `${Math.floor(d/86400)}d ago`; };
 const formatDate   = ts => ts ? new Date(ts).toLocaleDateString('en-GB') : '—';
+const isSheetImportedBug = bug => bug?.sourceKind === 'google_sheet' || Boolean(getMetadataValue(bug?.description, 'Source Tab'));
+const getIssueCreatedDate = bug => isSheetImportedBug(bug) ? (bug?.sourceCreatedAt || null) : (bug?.createdAt || null);
+const formatIssueCreatedDate = bug => {
+  const createdAt = getIssueCreatedDate(bug);
+  if (!createdAt) return 'Unavailable';
+  return formatDate(createdAt);
+};
 const getInitials = name => String(name||'').split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0,2).toUpperCase() || '?';
 const getMetadataValue = (description, label) => {
   if (!description) return '';
@@ -51,7 +58,7 @@ const resolveIssueUser = (bug, users, idKey, metadataLabels) => {
   return fallbackName ? { name: fallbackName, avatar: getInitials(fallbackName), color: '#64748b' } : null;
 };
 const COLORS       = ['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
-const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', frontend_developer:'Frontend Developer', backend_developer:'Backend Developer', tester:'Tester', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Developer':'Developer', 'Frontend Developer':'Frontend Developer', 'Backend Developer':'Backend Developer', 'Tester':'Tester', 'Viewer':'Viewer' };
+const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', frontend_developer:'Frontend Developer', backend_developer:'Backend Developer', tester:'QA', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Developer':'Developer', 'Frontend Developer':'Frontend Developer', 'Backend Developer':'Backend Developer', 'Tester':'QA', 'QA':'QA', 'Viewer':'Viewer' };
 const ROLE_COLORS  = { admin:'#ef4444', project_manager:'#f97316', developer:'#6366f1', frontend_developer:'#3b82f6', backend_developer:'#2563eb', tester:'#10b981', viewer:'#9ca3af', qa:'#10b981', 'Admin':'#ef4444', 'Project Manager':'#f97316', 'Developer':'#6366f1', 'Frontend Developer':'#3b82f6', 'Backend Developer':'#2563eb', 'Tester':'#10b981', 'Viewer':'#9ca3af' };
 const ALL_PERMISSIONS = ['CREATE_ISSUE','EDIT_ISSUE','DELETE_ISSUE','ASSIGN_ISSUE','CHANGE_STATUS','COMMENT','VIEW_ISSUE','VIEW_REPORTS','MANAGE_PROJECT','MANAGE_USERS','CONFIGURE_WORKFLOW'];
 
@@ -564,7 +571,7 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
               <div className="detail-field"><div className="detail-field-label">Project</div><div className="detail-field-value" style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:10,height:10,borderRadius:'50%',background:project?.color}}/>{project?.name}</div></div>
               <div className="detail-field"><div className="detail-field-label">Reporter</div><div className="detail-field-value" style={{display:'flex',alignItems:'center',gap:6}}>{reporter?<><Avatar user={reporter} size="xs"/>{reporter.name}</>:'Unknown'}</div></div>
               <hr className="divider"/>
-              <div className="detail-field"><div className="detail-field-label">Created</div><div className="detail-field-value text-sm text-muted">{new Date(bug.createdAt).toLocaleDateString()}</div></div>
+              <div className="detail-field"><div className="detail-field-label">Created</div><div className="detail-field-value text-sm text-muted">{formatIssueCreatedDate(bug)}</div></div>
               <div className="detail-field"><div className="detail-field-label">Updated</div><div className="detail-field-value text-sm text-muted">{timeAgo(bug.updatedAt)}</div></div>
             </div>
           </div>
@@ -583,7 +590,7 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
   const lineChart=useRef(null),doughnutChart=useRef(null),barChart=useRef(null);
   useEffect(()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; api.get(url).then(setStats); const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; api.get(bu).then(b=>setRecentBugs(b.slice(0,5))); },[currentProject]);
   useEffect(()=>{
-    if (!stats) return;
+    if (!stats || stats.error || !Array.isArray(stats.daily) || !stats.byStatus || !stats.byPriority) return;
     if (lineChart.current) lineChart.current.destroy();
     lineChart.current=new Chart(lineRef.current,{type:'line',data:{labels:stats.daily.map(d=>d.label),datasets:[{label:'Issues',data:stats.daily.map(d=>d.count),borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.15)',tension:0.4,fill:true,pointBackgroundColor:'#6366f1',pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'#334155'},ticks:{color:'#94a3b8'}},y:{grid:{color:'#334155'},ticks:{color:'#94a3b8',stepSize:1}}}}});
     if (doughnutChart.current) doughnutChart.current.destroy();
@@ -593,6 +600,13 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
     return()=>{if(lineChart.current)lineChart.current.destroy();if(doughnutChart.current)doughnutChart.current.destroy();if(barChart.current)barChart.current.destroy();};
   },[stats]);
   if (!stats) return <div style={{color:'var(--muted)',padding:40,textAlign:'center'}}>Loading dashboard…</div>;
+  if (stats.error) return (
+    <div className="empty-state">
+      <div className="icon">🔒</div>
+      <h3>Dashboard Unavailable</h3>
+      <p>{stats.error}</p>
+    </div>
+  );
   return (
     <div>
       <div className="page-header"><div><h1>Dashboard</h1><p>{currentProject?currentProject.name:'All Projects'} · Overview</p></div><button className="btn btn-primary" onClick={()=>onNavigate('list')}>View All Issues →</button></div>
@@ -610,7 +624,7 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:16}}>Recent Issues</h3>
         {recentBugs.length===0?<div className="text-muted text-sm">No issues found.</div>:(
           <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th><th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
-          <tbody>{recentBugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatDate(bug.createdAt)}</span></td><td><span className="issue-title">{bug.title}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
+          <tbody>{recentBugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
         )}
       </div>
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const nextStats = await api.get(url); setStats(nextStats); setSelectedBug(null); }}/>}
@@ -641,9 +655,9 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
       {bugs.length===0?<div className="empty-state"><div className="icon">🎉</div><h3>No issues found</h3><p>Try adjusting your filters or create a new issue.</p></div>:(
         <div className="table-card">
           <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th><th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
-          <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatDate(bug.createdAt)}</span></td><td><span className="issue-title">{bug.title}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
+          <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
           <div className="table-scroll" style={{display:'none'}}><table className="bug-table"><thead><tr><th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Raised By</th><th>Project</th><th>Created</th></tr></thead>
-          <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);return(<tr key={bug.id} onClick={()=>setSelectedBug(bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><TypeBadge t={bug.type}/></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td>{project&&<div style={{display:'flex',alignItems:'center',gap:5}}><div style={{width:8,height:8,borderRadius:'50%',background:project.color}}/><span style={{fontSize:12,color:'var(--muted)'}}>{project.name}</span></div>}</td><td><span className="text-muted text-sm">{timeAgo(bug.createdAt)}</span></td></tr>);})}</tbody></table>
+          <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);const createdAt=getIssueCreatedDate(bug);return(<tr key={bug.id} onClick={()=>setSelectedBug(bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><TypeBadge t={bug.type}/></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td>{project&&<div style={{display:'flex',alignItems:'center',gap:5}}><div style={{width:8,height:8,borderRadius:'50%',background:project.color}}/><span style={{fontSize:12,color:'var(--muted)'}}>{project.name}</span></div>}</td><td><span className="text-muted text-sm">{createdAt?timeAgo(createdAt):'Unavailable'}</span></td></tr>);})}</tbody></table>
           </div>
         </div>
       )}
@@ -784,7 +798,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
       <div className="page-header">
         <div>
           <h1>Team Members</h1>
-          <p>{users.length} member{users.length!==1?'s':''} · {users.filter(u=>u.role==='admin').length} admin · {users.filter(u=>u.role==='project_manager').length} project manager · {users.filter(u=>u.role==='developer').length} developer · {users.filter(u=>u.role==='frontend_developer').length} frontend · {users.filter(u=>u.role==='backend_developer').length} backend · {users.filter(u=>u.role==='tester' || u.role==='qa').length} tester · {users.filter(u=>u.role==='viewer').length} viewer</p>
+          <p>{users.length} member{users.length!==1?'s':''} · {users.filter(u=>u.role==='admin').length} admin · {users.filter(u=>u.role==='project_manager').length} project manager · {users.filter(u=>u.role==='developer').length} developer · {users.filter(u=>u.role==='frontend_developer').length} frontend · {users.filter(u=>u.role==='backend_developer').length} backend · {users.filter(u=>u.role==='tester' || u.role==='qa').length} QA · {users.filter(u=>u.role==='viewer').length} viewer</p>
         </div>
         {isAdmin && <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Member</button>}
       </div>
@@ -827,7 +841,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
                     <option value="developer">Developer</option>
                     <option value="frontend_developer">Frontend Developer</option>
                     <option value="backend_developer">Backend Developer</option>
-                    <option value="tester">Tester</option>
+                    <option value="tester">QA</option>
                     <option value="viewer">Viewer</option>
                   </select>
                   <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>setResetTarget(u)}>🔑 Reset PW</button>
@@ -854,7 +868,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
                   <option value="developer">Developer</option>
                   <option value="frontend_developer">Frontend Developer</option>
                   <option value="backend_developer">Backend Developer</option>
-                  <option value="tester">Tester</option>
+                  <option value="tester">QA</option>
                   <option value="viewer">Viewer</option>
                   <option value="admin">Admin</option>
                 </select>

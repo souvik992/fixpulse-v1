@@ -274,6 +274,23 @@ function parseExcelDate(raw) {
   return `${day}/${month}/${year}`;
 }
 
+function parseSheetDateToIso(raw) {
+  const value = parseExcelDate(raw);
+  if (!value) return null;
+  const slashMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 0, 0, 0)).toISOString();
+  }
+  const dashMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (dashMatch) {
+    const [, year, month, day] = dashMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 0, 0, 0)).toISOString();
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 function makeColor(seed) {
   let hash = 0;
   for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
@@ -416,6 +433,7 @@ function buildIssueRecord(sheetName, rowNumber, headerMap, row) {
     sheetName,
     rowNumber,
     sourceRef: `${SHEET_ID}:${sheetName}:${rowNumber}`,
+    sourceCreatedAt: parseSheetDateToIso(raw.date),
     title: title.length > 500 ? `${title.slice(0, 497)}...` : title,
     description,
     type: mapType(raw.issueType),
@@ -449,6 +467,7 @@ function hashIssue(issue) {
   return crypto
     .createHash('sha1')
     .update(JSON.stringify({
+      sourceCreatedAt: issue.sourceCreatedAt,
       title: issue.title,
       description: issue.description,
       type: issue.type,
@@ -467,6 +486,7 @@ async function ensureSchema() {
   await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS source_kind TEXT`);
   await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS source_ref TEXT`);
   await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS source_hash TEXT`);
+  await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS source_created_at TIMESTAMPTZ`);
   await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bugs_source_unique ON bugs(source_kind, source_ref) WHERE source_kind IS NOT NULL AND source_ref IS NOT NULL`);
 }
 
@@ -579,11 +599,11 @@ async function syncOnce() {
             `INSERT INTO bugs (
               org_id, key, project_id, title, description, type, priority, status,
               assignee_id, reporter_id, labels, attachments, reference_link, curl_command,
-              source_kind, source_ref, source_hash
+              source_kind, source_ref, source_hash, source_created_at, created_at
             ) VALUES (
               $1,$2,$3,$4,$5,$6,$7,$8,
               $9,$10,$11,$12,$13,$14,
-              $15,$16,$17
+              $15,$16,$17,$18,COALESCE($18, NOW())
             ) RETURNING id, source_ref, source_hash`,
             [
               org.id,
@@ -603,6 +623,7 @@ async function syncOnce() {
               'google_sheet',
               issue.sourceRef,
               sourceHash,
+              issue.sourceCreatedAt,
             ]
           );
           existingBySourceRef.set(issue.sourceRef, rows[0]);
@@ -628,7 +649,9 @@ async function syncOnce() {
                reference_link=$10,
                curl_command=$11,
                project_id=$12,
-               source_hash=$13
+               source_hash=$13,
+               source_created_at=$14,
+               created_at=COALESCE($14, created_at)
            WHERE id=$1`,
           [
             existing.id,
@@ -644,6 +667,7 @@ async function syncOnce() {
             issue.curlCommand,
             project.id,
             sourceHash,
+            issue.sourceCreatedAt,
           ]
         );
         existing.source_hash = sourceHash;

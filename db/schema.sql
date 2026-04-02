@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS bugs (
   attachments JSONB          NOT NULL DEFAULT '[]'::jsonb,
   reference_link TEXT        NOT NULL DEFAULT '',
   curl_command TEXT          NOT NULL DEFAULT '',
+  source_created_at TIMESTAMPTZ,
   created_at  TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 );

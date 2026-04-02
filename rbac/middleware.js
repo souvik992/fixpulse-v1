@@ -112,8 +112,8 @@ const LEGACY_TO_RBAC = {
   developer: 'Developer',
   frontend_developer: 'Frontend Developer',
   backend_developer: 'Backend Developer',
-  tester: 'Tester',
-  qa: 'Tester',
+  tester: 'QA',
+  qa: 'QA',
   viewer: 'Viewer',
 };
 

@@ -350,6 +350,23 @@ function parseExcelDate(raw) {
   return `${day}/${month}/${year}`;
 }
 
+function parseSheetDateToIso(raw) {
+  const value = parseExcelDate(raw);
+  if (!value) return null;
+  const slashMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 0, 0, 0)).toISOString();
+  }
+  const dashMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (dashMatch) {
+    const [, year, month, day] = dashMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 0, 0, 0)).toISOString();
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 function makeColor(seed) {
   let hash = 0;
   for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
@@ -505,6 +522,7 @@ function buildIssueRecord(sheetName, headerMap, row) {
   return {
     title: title.length > 500 ? title.slice(0, 497) + '...' : title,
     description,
+    sourceCreatedAt: parseSheetDateToIso(raw.date),
     type: mapType(raw.issueType),
     priority: mapPriority(raw.priorityRaw),
     status: mapStatus(raw.statusRaw),
@@ -742,6 +760,7 @@ async function main() {
           labels: issue.labels,
           referenceLink: issue.referenceLink,
           curlCommand: issue.curlCommand,
+          sourceCreatedAt: issue.sourceCreatedAt,
         });
       }
 
@@ -762,7 +781,7 @@ async function main() {
           logProgress(`Inserting batch of ${batch.length} into ${sheet.name}`);
           const values = [];
           const placeholders = batch.map((row, index) => {
-            const offset = index * 14;
+            const offset = index * 16;
             values.push(
               org.id,
               row.key,
@@ -777,16 +796,19 @@ async function main() {
               row.labels,
               JSON.stringify([]),
               row.referenceLink,
-              row.curlCommand
+              row.curlCommand,
+              row.sourceCreatedAt,
+              row.sourceCreatedAt
             );
-            return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8},$${offset + 9},$${offset + 10},$${offset + 11},$${offset + 12},$${offset + 13},$${offset + 14})`;
+            return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8},$${offset + 9},$${offset + 10},$${offset + 11},$${offset + 12},$${offset + 13},$${offset + 14},$${offset + 15},COALESCE($${offset + 16}, NOW()))`;
           });
 
           await client.query(
             `
               INSERT INTO bugs (
                 org_id, key, project_id, title, description, type, priority, status,
-                assignee_id, reporter_id, labels, attachments, reference_link, curl_command
+                assignee_id, reporter_id, labels, attachments, reference_link, curl_command,
+                source_created_at, created_at
               )
               VALUES ${placeholders.join(',')}
             `,
