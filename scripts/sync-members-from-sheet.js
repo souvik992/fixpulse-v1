@@ -158,6 +158,8 @@ async function main() {
       [org.id]
     );
     const users = usersResult.rows;
+    const allUsersResult = await client.query('SELECT id, org_id, name, email FROM users');
+    const allUsers = allUsersResult.rows;
 
     const directSheetByCanonical = new Map(sheetRows.map((row) => [canonical(row.name), row]));
     const usedSheetNames = new Set();
@@ -185,7 +187,9 @@ async function main() {
     }
 
     const emailOwners = new Map();
-    users.forEach((user) => emailOwners.set(user.email.toLowerCase(), user.id));
+    allUsers.forEach((user) => {
+      if (user.email) emailOwners.set(user.email.toLowerCase(), user);
+    });
 
     const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
     const updatedUsers = [];
@@ -196,12 +200,14 @@ async function main() {
       for (const match of matches) {
         const targetEmail = match.row.email.toLowerCase();
         const currentOwner = emailOwners.get(targetEmail);
-        if (currentOwner && currentOwner !== match.user.id) {
+        if (currentOwner && currentOwner.id !== match.user.id) {
           emailConflicts.push({
             user: match.user.name,
             currentEmail: match.user.email,
             targetEmail,
             matchedSheetName: match.row.name,
+            ownedBy: currentOwner.name,
+            ownedByOrgId: currentOwner.org_id,
           });
           continue;
         }
@@ -216,7 +222,7 @@ async function main() {
           `,
           [match.user.id, targetEmail, match.row.mobileNumber, passwordHash]
         );
-        emailOwners.set(targetEmail, match.user.id);
+        emailOwners.set(targetEmail, { id: match.user.id, org_id: match.user.org_id, name: match.user.name, email: targetEmail });
         updatedUsers.push({
           name: match.user.name,
           matchedSheetName: match.row.name,

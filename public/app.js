@@ -1212,6 +1212,7 @@ function App() {
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [showSidebarProjectCreate, setShowSidebarProjectCreate] = useState(false);
   const [toasts, setToasts]         = useState([]);
+  const [onlineUsers, setOnlineUsers] = useState([]);
   const [theme, setTheme]           = useState(() => localStorage.getItem('bt_theme') || 'light');
 
   // Apply theme to <html> whenever it changes
@@ -1245,6 +1246,17 @@ function App() {
     if (!authUser) return;
     Promise.all([api.get('/api/projects'), api.get('/api/members'), api.get('/api/bugs')])
       .then(([p, u, b]) => { setProjects(p); setUsers(u); setAllBugs(b); });
+  }, [authUser]);
+
+  // ── Presence: heartbeat + poll online users ──
+  useEffect(() => {
+    if (!authUser) return;
+    const beat = () => api.post('/api/presence/heartbeat', {});
+    const poll = () => api.get('/api/presence').then(data => { if (Array.isArray(data)) setOnlineUsers(data); });
+    beat(); poll();
+    const beatTimer = setInterval(beat, 30_000);
+    const pollTimer = setInterval(poll, 30_000);
+    return () => { clearInterval(beatTimer); clearInterval(pollTimer); };
   }, [authUser]);
 
   const handleAuth = (user, org) => {
@@ -1361,6 +1373,21 @@ function App() {
             <span className="search-icon">🔍</span>
             <input type="text" placeholder="Quick search…" onFocus={()=>setView('list')}/>
           </div>
+          {onlineUsers.length > 0 && (
+            <div className="online-members" title={`${onlineUsers.length} online`}>
+              {onlineUsers.slice(0,5).map((u, i) => (
+                <div key={u.id} className="online-member-avatar" style={{zIndex: onlineUsers.length - i}} title={u.name}>
+                  {u.avatar && u.avatar.startsWith('data:image/')
+                    ? <img src={u.avatar} alt={u.name} style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}} />
+                    : <span>{u.avatar || getInitials(u.name)}</span>}
+                  <span className="online-dot"/>
+                </div>
+              ))}
+              {onlineUsers.length > 5 && (
+                <div className="online-member-avatar online-member-overflow" style={{zIndex:0}}>+{onlineUsers.length - 5}</div>
+              )}
+            </div>
+          )}
           <button className="theme-toggle" onClick={toggleTheme} title={theme==='dark'?'Switch to light mode':'Switch to dark mode'}>
             {theme==='dark' ? '☀️' : '🌙'}
           </button>

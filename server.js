@@ -10,6 +10,32 @@ const { randomUUID } = require('crypto');
 const { PERMISSIONS } = require('./rbac/permissions');
 const { checkPermission, assignSystemRole, getUserPermissions, LEGACY_TO_RBAC } = require('./rbac/middleware');
 
+// ── In-memory presence store ──────────────────────────────────────────────────
+// Map<orgId, Map<userId, { lastSeen: Date, user: { id, name, avatar, color } }>>
+const presenceStore = new Map();
+const PRESENCE_TIMEOUT_MS = 60_000; // 60 s without heartbeat = offline
+
+function getOrgPresence(orgId) {
+  if (!presenceStore.has(orgId)) presenceStore.set(orgId, new Map());
+  return presenceStore.get(orgId);
+}
+
+function markPresence(orgId, userId, userData) {
+  const org = getOrgPresence(orgId);
+  org.set(userId, { lastSeen: Date.now(), user: userData });
+}
+
+function getOnlineUsers(orgId) {
+  const org = getOrgPresence(orgId);
+  const cutoff = Date.now() - PRESENCE_TIMEOUT_MS;
+  const online = [];
+  for (const [uid, entry] of org.entries()) {
+    if (entry.lastSeen >= cutoff) online.push(entry.user);
+    else org.delete(uid);
+  }
+  return online;
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'bugtracker_dev_secret';
@@ -1043,6 +1069,19 @@ app.get('/api/rbac/users/:userId/permissions', auth, async (req, res) => {
     const perms = await getUserPermissions(req.params.userId, req.user.orgId, projectId);
     res.json({ permissions: [...perms] });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Presence ────────────────────────────────────────────────────────────────
+// POST /api/presence/heartbeat — client calls every 30 s to stay "online"
+app.post('/api/presence/heartbeat', auth, (req, res) => {
+  const { id, name, avatar, color } = req.user;
+  markPresence(req.user.orgId, id, { id, name, avatar, color });
+  res.json({ ok: true });
+});
+
+// GET /api/presence — returns online users in same org
+app.get('/api/presence', auth, (req, res) => {
+  res.json(getOnlineUsers(req.user.orgId));
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
