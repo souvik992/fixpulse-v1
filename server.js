@@ -285,6 +285,46 @@ app.get('/api/auth/me', auth, async (req, res) => {
   }
 });
 
+app.put('/api/auth/me', auth, async (req, res) => {
+  try {
+    const { name, email, mobileNumber, avatarDataUrl, pin } = req.body;
+    if (avatarDataUrl && !avatarDataUrl.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'Invalid avatar data URL' });
+    }
+    if (email) {
+      const emailCheck = await db.query('SELECT id FROM users WHERE email=$1 AND id<>$2', [email, req.user.id]);
+      if (emailCheck.rows.length) {
+        return res.status(409).json({ error: 'Email already exists' });
+      }
+    }
+    let passwordHash = null;
+    if (pin !== undefined && pin !== null && String(pin).trim() !== '') {
+      const normalizedPin = String(pin).trim();
+      if (!/^\d{4,10}$/.test(normalizedPin)) {
+        return res.status(400).json({ error: 'Login PIN must be 4 to 10 digits' });
+      }
+      passwordHash = await bcrypt.hash(normalizedPin, 10);
+    }
+    const { rows } = await db.query(
+      `UPDATE users
+       SET name=COALESCE($1,name),
+           email=COALESCE($2,email),
+           mobile_number=COALESCE($3,mobile_number),
+           avatar=COALESCE($4,avatar),
+           password_hash=COALESCE($5,password_hash)
+       WHERE id=$6
+       RETURNING *`,
+      [name, email, mobileNumber, avatarDataUrl, passwordHash, req.user.id]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    res.json(strip(camel(rows[0])));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.put('/api/auth/me/photo', auth, async (req, res) => {
   try {
     const { avatarDataUrl } = req.body;
@@ -366,8 +406,11 @@ app.get('/api/org', auth, async (req, res) => {
   }
 });
 
-app.put('/api/org', auth, checkPermission(PERMISSIONS.CONFIGURE_WORKFLOW), async (req, res) => {
+app.put('/api/org', auth, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
     const { name, color, logoDataUrl } = req.body;
     if (logoDataUrl && !logoDataUrl.startsWith('data:image/')) {
       return res.status(400).json({ error: 'Invalid organization logo data URL' });

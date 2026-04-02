@@ -1243,6 +1243,61 @@ function SettingsPage({ org, setOrg, currentUser, toast }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  ROLES PAGE  (admin only – RBAC management)
 // ══════════════════════════════════════════════════════════════════════════════
+function ProfileSettingsModal({ user, onClose, onSave, toast }) {
+  const [form, setForm] = useState({ name:user?.name||'', email:user?.email||'', mobileNumber:user?.mobileNumber||'', pin:'', confirmPin:'' });
+  const [photoFile, setPhotoFile] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const setF = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const submit = async e => {
+    e.preventDefault();
+    if (!form.name.trim() || !form.email.trim()) { toast('Name and email are required', 'error'); return; }
+    if (form.pin || form.confirmPin) {
+      if (form.pin !== form.confirmPin) { toast('Login PINs do not match', 'error'); return; }
+      if (!/^\d{4,10}$/.test(form.pin)) { toast('Login PIN must be 4 to 10 digits', 'error'); return; }
+    }
+    setSaving(true);
+    const avatarDataUrl = photoFile ? await readImageAsDataUrl(photoFile) : null;
+    const res = await api.put('/api/auth/me', {
+      name: form.name,
+      email: form.email,
+      mobileNumber: form.mobileNumber,
+      avatarDataUrl,
+      pin: form.pin || undefined,
+    });
+    if (res.error) { toast(res.error, 'error'); setSaving(false); return; }
+    onSave(res);
+    toast('Profile updated', 'success');
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="modal-header"><h2 className="modal-title">Profile Settings</h2><button className="btn-icon" onClick={onClose}>✕</button></div>
+      <form onSubmit={submit}>
+        <div className="modal-body">
+          <div className="form-group">
+            <label className="form-label">Profile Photo</label>
+            <div style={{display:'flex',alignItems:'center',gap:14}}>
+              <Avatar user={{ ...user, avatar: photoFile ? URL.createObjectURL(photoFile) : user?.avatar }} />
+              <input className="form-input" type="file" accept="image/*" onChange={e=>setPhotoFile(e.target.files?.[0] || null)} />
+            </div>
+          </div>
+          <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" value={form.name} onChange={e=>setF('name',e.target.value)} required /></div>
+          <div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" value={form.email} onChange={e=>setF('email',e.target.value)} required /></div>
+          <div className="form-group"><label className="form-label">Phone Number</label><input className="form-input" value={form.mobileNumber} onChange={e=>setF('mobileNumber',e.target.value)} placeholder="Optional" /></div>
+          <div className="form-row">
+            <div className="form-group"><label className="form-label">Login PIN</label><input className="form-input" type="password" value={form.pin} onChange={e=>setF('pin',e.target.value)} placeholder="4 to 10 digits" /></div>
+            <div className="form-group"><label className="form-label">Confirm PIN</label><input className="form-input" type="password" value={form.confirmPin} onChange={e=>setF('confirmPin',e.target.value)} placeholder="Repeat PIN" /></div>
+          </div>
+        </div>
+        <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving?'Saving…':'Save Changes'}</button></div>
+      </form>
+    </Modal>
+  );
+}
+
 function RolesPage({ users, currentUser, toast }) {
   const [roles, setRoles]           = useState([]);
   const [selRole, setSelRole]       = useState(null);
@@ -1466,6 +1521,8 @@ function App() {
   const [allBugs, setAllBugs]       = useState([]);
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [showSidebarProjectCreate, setShowSidebarProjectCreate] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [toasts, setToasts]         = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [theme, setTheme]           = useState(() => localStorage.getItem('bt_theme') || 'light');
@@ -1566,6 +1623,12 @@ function App() {
   ];
   const navigate = v => setView(v);
 
+  useEffect(() => {
+    const closeMenu = () => setShowProfileMenu(false);
+    document.addEventListener('click', closeMenu);
+    return () => document.removeEventListener('click', closeMenu);
+  }, []);
+
   // ── Loading splash ──
   if (!authChecked) return (
     <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)', color:'var(--muted)' }}>
@@ -1620,22 +1683,6 @@ function App() {
           ))}
         </div>
 
-        <div className="sidebar-footer">
-          <div className="user-badge" style={{marginBottom:10}}>
-            <Avatar user={authUser} />
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{authUser.name}</div>
-              <div style={{display:'flex',alignItems:'center',gap:4}}>
-                <span style={{fontSize:10,fontWeight:600,color:'#fff',background:ROLE_COLORS[authUser.role]||'#6366f1',padding:'1px 6px',borderRadius:99,textTransform:'capitalize'}}>
-                  {ROLE_LABELS[authUser.role]||authUser.role}
-                </span>
-              </div>
-            </div>
-          </div>
-          <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={handleLogout}>
-            🚪 Log Out
-          </button>
-        </div>
       </aside>
 
       <main className="main">
@@ -1644,17 +1691,13 @@ function App() {
             {navItems.find(n=>n.id===view)?.icon} {navItems.find(n=>n.id===view)?.label}
             {currentProject&&<span style={{color:'var(--muted)',fontWeight:400,marginLeft:6}}>/ {currentProject.name}</span>}
           </span>
-          <div className="search-wrap">
-            <span className="search-icon">🔍</span>
-            <input type="text" placeholder="Quick search…" onFocus={()=>setView('list')}/>
-          </div>
           {onlineUsers.length > 0 && (
             <div className="online-members" title={`${onlineUsers.length} online`}>
               {onlineUsers.slice(0,5).map((u, i) => (
                 <div key={u.id} className="online-member-avatar" style={{zIndex: onlineUsers.length - i}} title={u.name}>
                   {u.avatar && u.avatar.startsWith('data:image/')
                     ? <img src={u.avatar} alt={u.name} style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}} />
-                    : <span>👤</span>}
+                    : <span>{String(u.name || '?').trim().charAt(0).toUpperCase() || '?'}</span>}
                   <span className="online-dot"/>
                 </div>
               ))}
@@ -1666,12 +1709,25 @@ function App() {
           <button className="theme-toggle" onClick={toggleTheme} title={theme==='dark'?'Switch to light mode':'Switch to dark mode'}>
             {theme==='dark' ? '☀️' : '🌙'}
           </button>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,position:'relative'}} onClick={e=>e.stopPropagation()}>
             <div style={{textAlign:'right',display:'flex',flexDirection:'column'}}>
               <span style={{fontSize:13,fontWeight:500}}>{authUser.name}</span>
-              <span style={{fontSize:11,color:'var(--muted)'}}>{authOrg?.name}</span>
+              <span style={{fontSize:11,color:'var(--muted)'}}>{ROLE_LABELS[authUser.role]||authUser.role}</span>
             </div>
-            <Avatar user={authUser} />
+            <button className="btn-ghost" style={{padding:0,border:'none',background:'transparent',display:'flex',alignItems:'center',gap:8}} onClick={()=>setShowProfileMenu(v=>!v)}>
+              <Avatar user={authUser} />
+              <span style={{fontSize:12,color:'var(--muted)'}}>▾</span>
+            </button>
+            {showProfileMenu && (
+              <div style={{position:'absolute',top:'calc(100% + 8px)',right:0,width:220,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',boxShadow:'var(--shadow)',padding:8,zIndex:50}}>
+                <div style={{padding:'8px 10px',borderBottom:'1px solid var(--border)',marginBottom:6}}>
+                  <div style={{fontWeight:600,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{authUser.name}</div>
+                  <div style={{fontSize:11,color:'var(--muted)'}}>{ROLE_LABELS[authUser.role]||authUser.role}</div>
+                </div>
+                <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'flex-start',marginBottom:6}} onClick={()=>{setShowProfileMenu(false);setShowProfileSettings(true);}}>Profile Settings</button>
+                <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'flex-start'}} onClick={handleLogout}>Log Out</button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1687,6 +1743,7 @@ function App() {
       </main>
 
       {showSidebarProjectCreate&&<ProjectModal onClose={()=>setShowSidebarProjectCreate(false)} onCreate={async form=>{const p=await api.post('/api/projects',form);setProjects(ps=>[...ps,p]);setShowSidebarProjectCreate(false);handleProjectCreated(p);toast('Project created','success');}}/>}
+      {showProfileSettings&&<ProfileSettingsModal user={authUser} onClose={()=>setShowProfileSettings(false)} onSave={user=>setAuthUser(user)} toast={toast}/>}
       <Toast toasts={toasts} dismiss={id=>setToasts(ts=>ts.filter(t=>t.id!==id))}/>
     </div>
   );
