@@ -4,6 +4,8 @@ const cors = require('cors');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const Razorpay = require('razorpay');
 const db = require('./db');
 const { sendAssigneeNotification, sendPasswordResetEmail } = require('./utils/email');
 const { randomUUID } = require('crypto');
@@ -71,11 +73,22 @@ function slugify(value) {
 }
 
 const PLAN_DEFINITIONS = {
-  basic: { code: 'basic', name: 'Basic', userLimit: 10, priceLabel: 'Free' },
-  plus: { code: 'plus', name: 'Plus', userLimit: 50, priceLabel: '₹2,999/mo' },
-  enterprise: { code: 'enterprise', name: 'Enterprise', userLimit: null, priceLabel: 'Custom' },
+  basic: { code: 'basic', name: 'Basic', userLimit: 10, priceLabel: 'Free', amountPaise: 0 },
+  plus: { code: 'plus', name: 'Plus', userLimit: 50, priceLabel: 'Rs 2,999 / month', amountPaise: 299900 },
+  enterprise: { code: 'enterprise', name: 'Enterprise', userLimit: null, priceLabel: 'Rs 9,999 / month', amountPaise: 999900 },
 };
 const DEFAULT_PLAN_CODE = 'enterprise';
+const razorpayKeyId = process.env.RAZORPAY_KEY_ID || '';
+const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || '';
+const razorpayConfigured = Boolean(
+  razorpayKeyId &&
+  razorpayKeySecret &&
+  !razorpayKeyId.startsWith('your_') &&
+  !razorpayKeySecret.startsWith('your_')
+);
+const razorpay = razorpayConfigured
+  ? new Razorpay({ key_id: razorpayKeyId, key_secret: razorpayKeySecret })
+  : null;
 
 function normalizePlan(planCode) {
   return PLAN_DEFINITIONS[planCode] || PLAN_DEFINITIONS[DEFAULT_PLAN_CODE];
@@ -94,6 +107,7 @@ function buildOrgPayload(orgRow) {
     planName: plan.name,
     userLimit: plan.userLimit,
     priceLabel: plan.priceLabel,
+    amountPaise: plan.amountPaise,
     currentUserCount: org.currentUserCount ?? undefined,
   };
 }
@@ -481,6 +495,9 @@ app.put('/api/org/plan', auth, async (req, res) => {
       return res.status(400).json({ error: 'Unsupported plan' });
     }
     const nextPlan = normalizePlan(req.body.planCode);
+    if (nextPlan.amountPaise > 0) {
+      return res.status(400).json({ error: `Paid activation required for the ${nextPlan.name} plan.` });
+    }
     const { rows: counts } = await db.query('SELECT COUNT(*)::int AS count FROM users WHERE org_id=$1', [req.user.orgId]);
     const currentUserCount = counts[0]?.count || 0;
     if (nextPlan.userLimit !== null && currentUserCount > nextPlan.userLimit) {
@@ -501,6 +518,108 @@ app.put('/api/org/plan', auth, async (req, res) => {
       [req.user.orgId]
     );
     res.json(buildOrgPayload(rows[0]));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/billing/create-order', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    if (!razorpayConfigured || !razorpay) {
+      return res.status(503).json({ error: 'Razorpay is not configured yet. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.' });
+    }
+    if (!PLAN_DEFINITIONS[req.body.planCode]) {
+      return res.status(400).json({ error: 'Unsupported plan' });
+    }
+    const plan = normalizePlan(req.body.planCode);
+    if (plan.amountPaise <= 0) {
+      return res.status(400).json({ error: 'This plan does not require payment.' });
+    }
+    const { rows: counts } = await db.query('SELECT COUNT(*)::int AS count FROM users WHERE org_id=$1', [req.user.orgId]);
+    const currentUserCount = counts[0]?.count || 0;
+    if (plan.userLimit !== null && currentUserCount > plan.userLimit) {
+      return res.status(400).json({ error: `Cannot switch to ${plan.name}. Current team size is ${currentUserCount}, but this plan allows only ${plan.userLimit} users.` });
+    }
+    const receipt = `plan_${req.user.orgId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+    const order = await razorpay.orders.create({
+      amount: plan.amountPaise,
+      currency: 'INR',
+      receipt,
+      notes: {
+        org_id: req.user.orgId,
+        plan_code: plan.code,
+        requested_by: req.user.id,
+      },
+    });
+    await db.query(
+      `INSERT INTO billing_orders (org_id, plan_code, amount_paise, currency, status, razorpay_order_id, receipt)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [req.user.orgId, plan.code, plan.amountPaise, 'INR', 'created', order.id, receipt]
+    );
+    res.json({
+      keyId: razorpayKeyId,
+      orderId: order.id,
+      amount: plan.amountPaise,
+      currency: 'INR',
+      planCode: plan.code,
+      planName: plan.name,
+      orgName: req.user.orgId,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/billing/verify-payment', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    if (!razorpayConfigured || !razorpayKeySecret) {
+      return res.status(503).json({ error: 'Razorpay is not configured yet.' });
+    }
+    const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      return res.status(400).json({ error: 'Missing Razorpay payment details' });
+    }
+    const expectedSignature = crypto
+      .createHmac('sha256', razorpayKeySecret)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest('hex');
+    if (expectedSignature !== razorpaySignature) {
+      return res.status(400).json({ error: 'Payment signature verification failed' });
+    }
+    const { rows } = await db.query(
+      'SELECT * FROM billing_orders WHERE razorpay_order_id=$1 AND org_id=$2',
+      [razorpayOrderId, req.user.orgId]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Billing order not found' });
+    }
+    const billingOrder = camel(rows[0]);
+    const plan = normalizePlan(billingOrder.planCode);
+    await db.query(
+      `UPDATE billing_orders
+       SET status='paid', razorpay_payment_id=$1, verified_at=NOW()
+       WHERE id=$2`,
+      [razorpayPaymentId, billingOrder.id]
+    );
+    await db.query(
+      'UPDATE organizations SET plan_code=$1, user_limit=$2 WHERE id=$3',
+      [plan.code, plan.userLimit, req.user.orgId]
+    );
+    const { rows: orgRows } = await db.query(
+      `SELECT o.*, (
+         SELECT COUNT(*)::int FROM users u WHERE u.org_id = o.id
+       ) AS current_user_count
+       FROM organizations o
+       WHERE o.id=$1`,
+      [req.user.orgId]
+    );
+    res.json(buildOrgPayload(orgRows[0]));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1274,7 +1393,11 @@ app.get('/api/sheet-sync/status', auth, async (req, res) => {
   }
 });
 
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 (async () => {
   try {

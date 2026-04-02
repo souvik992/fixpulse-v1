@@ -189,9 +189,9 @@ const COLORS       = ['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899
 const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', frontend_developer:'Frontend Developer', backend_developer:'Backend Developer', tester:'QA', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Developer':'Developer', 'Frontend Developer':'Frontend Developer', 'Backend Developer':'Backend Developer', 'Tester':'QA', 'QA':'QA', 'Viewer':'Viewer' };
 const ROLE_COLORS  = { admin:'#ef4444', project_manager:'#f97316', developer:'#6366f1', frontend_developer:'#3b82f6', backend_developer:'#2563eb', tester:'#10b981', viewer:'#9ca3af', qa:'#10b981', 'Admin':'#ef4444', 'Project Manager':'#f97316', 'Developer':'#6366f1', 'Frontend Developer':'#3b82f6', 'Backend Developer':'#2563eb', 'Tester':'#10b981', 'Viewer':'#9ca3af' };
 const PLAN_OPTIONS = [
-  { code:'basic', name:'Basic', price:'Free', userLimit:10, blurb:'Good for small teams starting out.' },
-  { code:'plus', name:'Plus', price:'Rs 2,999 / month', userLimit:50, blurb:'Built for growing teams and active projects.' },
-  { code:'enterprise', name:'Enterprise', price:'Custom', userLimit:null, blurb:'Unlimited users with full flexibility.' },
+  { code:'basic', name:'Basic', price:'Free', userLimit:10, blurb:'A clean starting point for small teams that need structured bug tracking without complexity.', cta:'Start Free', featured:false },
+  { code:'plus', name:'Plus', price:'Rs 2,999 / month', userLimit:50, blurb:'A professional plan for active engineering, QA, and delivery teams that need more seats and room to grow.', cta:'Pay and Upgrade', featured:true },
+  { code:'enterprise', name:'Enterprise', price:'Rs 9,999 / month', userLimit:null, blurb:'For larger rollouts, unlimited seats, and organizations that need unrestricted team expansion.', cta:'Pay and Upgrade', featured:false },
 ];
 const ALL_PERMISSIONS = ['CREATE_ISSUE','EDIT_ISSUE','DELETE_ISSUE','ASSIGN_ISSUE','CHANGE_STATUS','COMMENT','VIEW_ISSUE','VIEW_REPORTS','MANAGE_PROJECT','MANAGE_USERS','CONFIGURE_WORKFLOW'];
 
@@ -214,6 +214,23 @@ const readImageAsDataUrl = file => new Promise((resolve, reject) => {
   reader.onload = () => resolve(reader.result);
   reader.onerror = reject;
   reader.readAsDataURL(file);
+});
+
+const ensureRazorpayLoaded = () => new Promise((resolve, reject) => {
+  if (window.Razorpay) return resolve(true);
+  const existing = document.querySelector('script[data-razorpay-checkout]');
+  if (existing) {
+    existing.addEventListener('load', () => resolve(true), { once: true });
+    existing.addEventListener('error', () => reject(new Error('Unable to load Razorpay checkout')), { once: true });
+    return;
+  }
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  script.async = true;
+  script.dataset.razorpayCheckout = 'true';
+  script.onload = () => resolve(true);
+  script.onerror = () => reject(new Error('Unable to load Razorpay checkout'));
+  document.body.appendChild(script);
 });
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
@@ -1210,10 +1227,55 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
 
   const changePlan = async planCode => {
     setPlanSaving(planCode);
-    const res = await api.put('/api/org/plan', { planCode });
-    if (res.error) toast(res.error, 'error');
-    else { setOrg(res); toast(`${res.planName} plan activated`, 'success'); }
-    setPlanSaving('');
+    const plan = PLAN_OPTIONS.find(p => p.code === planCode);
+    if (!plan) {
+      toast('Unsupported plan', 'error');
+      setPlanSaving('');
+      return;
+    }
+    if (plan.code === 'basic') {
+      const res = await api.put('/api/org/plan', { planCode });
+      if (res.error) toast(res.error, 'error');
+      else { setOrg(res); toast(`${res.planName} plan activated`, 'success'); }
+      setPlanSaving('');
+      return;
+    }
+    try {
+      await ensureRazorpayLoaded();
+      const order = await api.post('/api/billing/create-order', { planCode });
+      if (order.error) { toast(order.error, 'error'); setPlanSaving(''); return; }
+      const paymentObject = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'FixPulse',
+        description: `${plan.name} Plan Upgrade`,
+        order_id: order.orderId,
+        theme: { color: '#17a34a' },
+        handler: async response => {
+          const verified = await api.post('/api/billing/verify-payment', {
+            razorpayOrderId: response.razorpay_order_id,
+            razorpayPaymentId: response.razorpay_payment_id,
+            razorpaySignature: response.razorpay_signature,
+          });
+          if (verified.error) {
+            toast(verified.error, 'error');
+            setPlanSaving('');
+            return;
+          }
+          setOrg(verified);
+          toast(`${verified.planName} plan activated`, 'success');
+          setPlanSaving('');
+        },
+        modal: {
+          ondismiss: () => setPlanSaving(''),
+        },
+      });
+      paymentObject.open();
+    } catch (error) {
+      toast(error.message || 'Unable to start payment', 'error');
+      setPlanSaving('');
+    }
   };
 
   const currentUsers = users?.length || org?.currentUserCount || 0;
@@ -1230,22 +1292,32 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
             </div>
             <button className="btn btn-ghost" onClick={()=>window.open('/pricing.html','_blank')}>View Pricing Page</button>
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:16}}>
             {PLAN_OPTIONS.map(plan => {
               const active = org?.planCode === plan.code;
               const overLimit = plan.userLimit !== null && currentUsers > plan.userLimit;
               return (
-                <div key={plan.code} style={{background:'var(--surface2)',border:`1px solid ${active?'var(--primary)':'var(--border)'}`,borderRadius:'var(--radius)',padding:18}}>
+                <div key={plan.code} style={{background:plan.featured?'linear-gradient(180deg, color-mix(in srgb, var(--surface) 86%, white 14%), var(--surface))':'var(--surface2)',border:`1px solid ${active?'var(--primary)':'var(--border)'}`,borderRadius:20,padding:20,boxShadow:plan.featured?'0 16px 40px rgba(23,163,74,.12)':'none'}}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-                    <strong>{plan.name}</strong>
-                    {active && <span style={{fontSize:11,fontWeight:700,color:'var(--primary)'}}>ACTIVE</span>}
+                    <strong style={{fontSize:18}}>{plan.name}</strong>
+                    {active
+                      ? <span style={{fontSize:11,fontWeight:700,color:'var(--primary)'}}>ACTIVE</span>
+                      : plan.featured
+                        ? <span style={{fontSize:11,fontWeight:700,color:'#16a34a'}}>POPULAR</span>
+                        : null}
                   </div>
-                  <div style={{fontSize:22,fontWeight:700,marginBottom:6}}>{plan.price}</div>
-                  <div style={{fontSize:12,color:'var(--muted)',marginBottom:10}}>{plan.userLimit===null?'Unlimited users':`Up to ${plan.userLimit} users`}</div>
-                  <p style={{fontSize:12,color:'var(--muted)',lineHeight:1.5,marginBottom:14}}>{plan.blurb}</p>
+                  <div style={{fontSize:28,fontWeight:800,marginBottom:6,letterSpacing:'-.03em'}}>{plan.price}</div>
+                  <div style={{fontSize:12,color:'var(--muted)',marginBottom:12}}>{plan.userLimit===null?'Unlimited users':`Up to ${plan.userLimit} users`}</div>
+                  <p style={{fontSize:12,color:'var(--muted)',lineHeight:1.6,marginBottom:16,minHeight:58}}>{plan.blurb}</p>
+                  <div style={{display:'grid',gap:8,marginBottom:16,fontSize:12,color:'var(--text)'}}>
+                    <div>Unlimited projects and issues</div>
+                    <div>Dashboard and report export</div>
+                    <div>{plan.userLimit===null?'Best for company-wide adoption':'Role-based workflow included'}</div>
+                  </div>
                   <button className="btn btn-primary btn-sm" disabled={active || overLimit || !!planSaving} onClick={()=>changePlan(plan.code)} style={{width:'100%',justifyContent:'center'}}>
-                    {active ? 'Current Plan' : overLimit ? 'Too Many Users' : planSaving===plan.code ? 'Updating…' : `Switch to ${plan.name}`}
+                    {active ? 'Current Plan' : overLimit ? 'Too Many Users' : planSaving===plan.code ? 'Updating…' : plan.cta}
                   </button>
+                  {!active && overLimit && <div style={{fontSize:11,color:'var(--danger)',marginTop:8}}>Reduce team size before switching.</div>}
                 </div>
               );
             })}

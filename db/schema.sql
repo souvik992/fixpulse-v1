@@ -22,6 +22,20 @@ ALTER TABLE organizations
 ALTER TABLE organizations
   ADD COLUMN IF NOT EXISTS user_limit INTEGER;
 
+CREATE TABLE IF NOT EXISTS billing_orders (
+  id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id              UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  plan_code           TEXT        NOT NULL,
+  amount_paise        INTEGER     NOT NULL,
+  currency            TEXT        NOT NULL DEFAULT 'INR',
+  status              TEXT        NOT NULL DEFAULT 'created',
+  razorpay_order_id   TEXT        UNIQUE,
+  razorpay_payment_id TEXT,
+  receipt             TEXT        NOT NULL UNIQUE,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  verified_at         TIMESTAMPTZ
+);
+
 -- ── users ──────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
