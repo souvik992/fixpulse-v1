@@ -79,119 +79,94 @@ const renderPriorityBars = stats => {
 const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) => {
   const rows = bugs.map(bug => {
     const assignee = resolveIssueUser(bug, users, 'assigneeId', ['Assignee(s)', 'Assignee From Sheet']);
-    const reporter = resolveIssueUser(bug, users, 'reporterId', 'Raised By');
+    const issueUrl = `${window.location.origin}/#issue/${bug.id}`;
     return `
-      <tr>
-        <td>${escapeHtml(bug.key || '')}</td>
-        <td>${escapeHtml(formatIssueCreatedDate(bug))}</td>
-        <td>${escapeHtml(bug.title)}</td>
-        <td>${escapeHtml(reporter?.name || 'Unknown')}</td>
-        <td>${escapeHtml(bug.type || 'Bug')}</td>
-        <td>${escapeHtml(assignee?.name || 'Unassigned')}</td>
-        <td>${escapeHtml(bug.priority || 'Medium')}</td>
-        <td>${escapeHtml(bug.status || 'To Do')}</td>
-        <td>${escapeHtml(formatDate(bug.updatedAt))}</td>
+      <tr class="issuerow">
+        <td class="issuetype">${escapeHtml(bug.type || 'Bug')}</td>
+        <td class="issuekey"><a class="issue-link" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bug.key || '')}</a></td>
+        <td class="summary"><p>${escapeHtml(bug.title)}</p></td>
+        <td class="priority">${escapeHtml(bug.priority || 'Medium')}</td>
+        <td class="assignee">${escapeHtml(assignee?.name || 'Unassigned')}</td>
+        <td class="status"><span class="status-lozenge">${escapeHtml(bug.status || 'To Do')}</span></td>
       </tr>
     `;
   }).join('');
   return `<!doctype html>
-<html lang="en">
+<html xmlns="http://www.w3.org/TR/REC-html40" lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(project.name)} Report - FixPulse</title>
+  <title>Jira</title>
+  <meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8">
   <style>
-    :root { --ink:#0f172a; --muted:#475569; --line:#dbe3ef; --surface:#ffffff; --soft:#f8fafc; --accent:${project.color || '#16a34a'}; }
-    * { box-sizing:border-box; }
-    body { margin:0; font-family:Arial,sans-serif; color:var(--ink); background:#eef3f8; }
-    .page { max-width:1180px; margin:32px auto; background:var(--surface); border:1px solid var(--line); border-radius:24px; overflow:hidden; box-shadow:0 20px 70px rgba(15,23,42,.08); }
-    .hero { padding:32px; background:linear-gradient(135deg, #08121f 0%, #102336 48%, ${project.color || '#16a34a'} 220%); color:#fff; }
-    .brand { display:flex; align-items:center; gap:14px; margin-bottom:22px; }
-    .brand img { width:48px; height:48px; border-radius:14px; object-fit:cover; background:#fff; }
-    .eyebrow { text-transform:uppercase; letter-spacing:.18em; font-size:12px; opacity:.72; margin-bottom:8px; }
-    h1 { margin:0; font-size:34px; line-height:1.1; }
-    .hero p { margin:10px 0 0; color:rgba(255,255,255,.82); font-size:15px; }
-    .meta { display:flex; gap:18px; flex-wrap:wrap; margin-top:22px; font-size:13px; color:rgba(255,255,255,.82); }
-    .content { padding:28px 32px 36px; }
-    .metrics { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:16px; margin-bottom:22px; }
-    .card { background:var(--soft); border:1px solid var(--line); border-radius:18px; padding:18px; }
-    .metric-label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
-    .metric-value { margin-top:8px; font-size:32px; font-weight:700; }
-    .grid { display:grid; grid-template-columns:1.2fr .8fr; gap:18px; margin-bottom:18px; }
-    .section-title { margin:0 0 14px; font-size:15px; }
-    .pill-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px; }
-    .pill { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:14px; background:#fff; border:1px solid var(--line); }
-    .bar-row + .bar-row { margin-top:12px; }
-    .bar-meta { display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px; }
-    .bar-track { height:10px; background:#e2e8f0; border-radius:999px; overflow:hidden; }
-    .bar-fill { height:100%; background:linear-gradient(90deg, ${project.color || '#16a34a'}, #0f172a); border-radius:999px; }
-    table { width:100%; border-collapse:collapse; font-size:13px; }
-    th, td { padding:12px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
-    th { background:#f8fafc; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; position:sticky; top:0; }
-    .table-wrap { max-height:70vh; overflow:auto; border:1px solid var(--line); border-radius:18px; }
-    .footer { margin-top:18px; color:var(--muted); font-size:12px; }
-    @media print { body { background:#fff; } .page { margin:0; border:none; box-shadow:none; } }
-    @media (max-width: 900px) { .metrics, .grid { grid-template-columns:1fr; } .content, .hero { padding:22px; } h1 { font-size:28px; } }
+    table { mso-displayed-decimal-separator:"\\."; mso-displayed-thousand-separator:"\\,"; }
+    body { margin:0; font-size:12px; font-family:Arial,sans-serif; color:black; background:white; }
+    @page {
+      mso-page-orientation:landscape;
+      margin:.25in .25in .5in .25in;
+      mso-header-margin:.5in;
+      mso-footer-margin:.25in;
+      mso-footer-data:"&R&P of &N";
+      mso-horizontal-page-align:center;
+      mso-vertical-page-align:center;
+    }
+    td.issuekey, td.issuetype, td.status { mso-style-parent:""; mso-number-format:\\@; text-align:left; }
+    br { mso-data-placement:same-cell; }
+    td { vertical-align:top; }
+    a { color:#2a5db0; text-decoration:none; }
+    .summary p { margin:0; }
+    .status-lozenge {
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:12px;
+      background:#dfe1e6;
+      color:#172b4d;
+      font-size:11px;
+      font-weight:700;
+    }
+    .report-link { margin: 6px 0; display:inline-block; }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="hero">
-      <div class="brand">
-        <img src="${escapeHtml(window.location.origin + BRAND_LOGO)}" alt="FixPulse" />
-        <div>
-          <div class="eyebrow">FixPulse Project Report</div>
-          <h1>${escapeHtml(project.name)}</h1>
-        </div>
-      </div>
-      <p>${escapeHtml(project.description || 'Project issue summary and tracker report.')}</p>
-      <div class="meta">
-        <span>Project Key: ${escapeHtml(project.key || '-')}</span>
-        <span>Generated: ${escapeHtml(new Date(generatedAt).toLocaleString('en-GB'))}</span>
-        <span>Total Issues: ${bugs.length}</span>
-      </div>
-    </div>
-    <div class="content">
-      <div class="metrics">
-        <div class="card"><div class="metric-label">Total Issues</div><div class="metric-value">${stats.total}</div></div>
-        <div class="card"><div class="metric-label">Open Issues</div><div class="metric-value">${stats.openCount}</div></div>
-        <div class="card"><div class="metric-label">Completed</div><div class="metric-value">${stats.doneCount}</div></div>
-        <div class="card"><div class="metric-label">Critical</div><div class="metric-value">${stats.byPriority?.Critical || 0}</div></div>
-      </div>
-      <div class="grid">
-        <div class="card">
-          <h2 class="section-title">Status Breakdown</h2>
-          <div class="pill-grid">${renderCompactStatusPills(stats)}</div>
-        </div>
-        <div class="card">
-          <h2 class="section-title">Priority Breakdown</h2>
-          ${renderPriorityBars(stats)}
-        </div>
-      </div>
-      <div class="card">
-        <h2 class="section-title">Issue Register</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Date Created</th>
-                <th>Issue Title</th>
-                <th>Raised By</th>
-                <th>Issue Type</th>
-                <th>Assignee</th>
-                <th>Priority</th>
-                <th>Status</th>
-                <th>Last Updated</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </div>
-      <div class="footer">Generated from FixPulse. This HTML report is ready to print or save as PDF from the browser.</div>
-    </div>
-  </div>
+  <table border="1">
+    <tr bgcolor="#205081" height="30">
+      <td colspan="6">
+        <img src="${escapeHtml(window.location.origin + BRAND_LOGO)}" width="57" height="30" border="0" alt="Jira">
+      </td>
+    </tr>
+    <tr>
+      <td colspan="6">
+        <a class="report-link" href="${escapeHtml(window.location.origin)}">${escapeHtml(project.name)} Report</a>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="6">
+        Displaying <strong>${bugs.length}</strong> issues at <strong>${escapeHtml(new Date(generatedAt).toLocaleString('en-GB'))}</strong>.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Total</strong><br>${stats.total}</td>
+      <td><strong>Open</strong><br>${stats.openCount}</td>
+      <td><strong>Done</strong><br>${stats.doneCount}</td>
+      <td><strong>Critical</strong><br>${stats.byPriority?.Critical || 0}</td>
+      <td><strong>Project Key</strong><br>${escapeHtml(project.key || '-')}</td>
+      <td><strong>Generated For</strong><br>${escapeHtml(project.name)}</td>
+    </tr>
+  </table>
+
+  <table id="issuetable" border="1" cellpadding="3" cellspacing="1" width="100%">
+    <thead>
+      <tr class="rowHeader">
+        <th>Issue Type</th>
+        <th>Key</th>
+        <th>Summary</th>
+        <th>Priority</th>
+        <th>Assignee</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
 </body>
 </html>`;
 };
