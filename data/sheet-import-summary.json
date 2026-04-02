@@ -1,0 +1,22 @@
+{
+  "createdProjects": [
+    {
+      "name": "B2C (durai store)",
+      "key": "B2CDU"
+    }
+  ],
+  "reusedProjects": [],
+  "createdUsers": [],
+  "reusedUsers": [
+    {
+      "name": "Renganathan",
+      "email": "renganathan@import.fixpulse.local"
+    }
+  ],
+  "importedIssues": {
+    "B2C (durai store)": 15
+  },
+  "skippedIssues": {
+    "B2C (durai store)": 0
+  }
+}

@@ -28,6 +28,7 @@ const priorityIcon = p => ({ Critical:'🔴', High:'🟠', Medium:'🟡', Low:'�
 const typeIcon     = t => ({ Bug:'🐛', Feature:'✨', Task:'📋', Improvement:'⚡' }[t]||'');
 const statusIcon   = s => ({ 'To Do':'○', 'In Progress':'◑', 'In Review':'◕', 'Done':'●' }[s]||'○');
 const timeAgo      = ts => { const d=Math.floor((Date.now()-new Date(ts))/1000); if(d<60)return 'just now'; if(d<3600)return `${Math.floor(d/60)}m ago`; if(d<86400)return `${Math.floor(d/3600)}h ago`; return `${Math.floor(d/86400)}d ago`; };
+const formatDate   = ts => ts ? new Date(ts).toLocaleDateString('en-GB') : '—';
 const COLORS       = ['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
 const ROLE_LABELS  = { admin:'Admin', project_manager:'Project Manager', developer:'Developer', frontend_developer:'Frontend Developer', backend_developer:'Backend Developer', tester:'Tester', viewer:'Viewer', qa:'QA', 'Project Manager':'Project Manager', 'Developer':'Developer', 'Frontend Developer':'Frontend Developer', 'Backend Developer':'Backend Developer', 'Tester':'Tester', 'Viewer':'Viewer' };
 const ROLE_COLORS  = { admin:'#ef4444', project_manager:'#f97316', developer:'#6366f1', frontend_developer:'#3b82f6', backend_developer:'#2563eb', tester:'#10b981', viewer:'#9ca3af', qa:'#10b981', 'Admin':'#ef4444', 'Project Manager':'#f97316', 'Developer':'#6366f1', 'Frontend Developer':'#3b82f6', 'Backend Developer':'#2563eb', 'Tester':'#10b981', 'Viewer':'#9ca3af' };
@@ -44,6 +45,16 @@ const readFilesAsAttachments = files => Promise.all(
     }))
 );
 
+const readImageAsDataUrl = file => new Promise((resolve, reject) => {
+  if (!file || !file.type.startsWith('image/')) {
+    return resolve(null); // Or handle error appropriately, e.g., reject('Only image files are allowed');
+  }
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
 // ── Toast ──────────────────────────────────────────────────────────────────────
 function Toast({ toasts, dismiss }) {
   return (
@@ -51,6 +62,7 @@ function Toast({ toasts, dismiss }) {
       {toasts.map(t => (
         <div key={t.id} className={`toast toast-${t.type}`} onClick={() => dismiss(t.id)}>
           <span>{t.type==='success'?'✓':t.type==='error'?'✗':'ℹ'}</span><span>{t.message}</span>
+          </div>
         </div>
       ))}
     </div>
@@ -60,7 +72,10 @@ function Toast({ toasts, dismiss }) {
 // ── Avatar ─────────────────────────────────────────────────────────────────────
 function Avatar({ user, size='' }) {
   if (!user) return <div className={`avatar avatar-${size||'sm'}`} style={{background:'#475569'}}>?</div>;
-  return <div className={`avatar ${size==='xs'?'avatar-xs':size==='sm'?'avatar-sm':''}`} style={{background:user.color||'#6366f1'}} title={user.name}>{user.avatar}</div>;
+  if (user.avatar && user.avatar.startsWith('data:image/')) {
+    return <img src={user.avatar} alt={user.name} className={`avatar ${size==='xs'?'avatar-xs':size==='sm'?'avatar-sm':''}`} style={{background:user.color||'#6366f1'}} title={user.name} />;
+  }
+  return <div className={`avatar ${size==='xs'?'avatar-xs':size==='sm'?'avatar-sm':''}`} style={{background:user.color||'#6366f1'}} title={user.name}>{user.avatar}</div>; // user.avatar is initials
 }
 
 function PriorityBadge({ p }) { return <span className={`badge ${priorityBadge(p)}`}>{priorityIcon(p)} {p}</span>; }
@@ -83,6 +98,7 @@ function AuthPage({ onAuth }) {
   const initialToken = new URLSearchParams(window.location.search).get('reset_token') || '';
   const [mode, setMode]       = useState(initialToken ? 'reset-password' : 'landing'); // 'landing' | 'login' | 'register' | 'forgot-password' | 'reset-password' | 'reset-done'
   const [form, setForm]       = useState({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1', resetToken: initialToken });
+  const [avatarFile, setAvatarFile] = useState(null);
   const [error, setError]     = useState('');
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw]   = useState(false);
@@ -126,12 +142,14 @@ function AuthPage({ onAuth }) {
       if (form.password.length < 6) return setError('Password must be at least 6 characters');
       if (form.password !== form.confirm) return setError('Passwords do not match');
     }
+
     setLoading(true);
     try {
       const url  = mode==='login' ? '/api/auth/login' : '/api/auth/register-company';
-      const body = mode==='login'
+      const avatarDataUrl = avatarFile ? await readImageAsDataUrl(avatarFile) : null;
+      const body = mode === 'login'
         ? { email: form.email, password: form.password }
-        : { companyName: form.companyName, name: form.name, email: form.email, password: form.password, color: form.color };
+        : { companyName: form.companyName, name: form.name, email: form.email, password: form.password, color: form.color, avatarDataUrl };
       const res  = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       const data = await res.json();
       if (!res.ok) { setError(data.error||'Something went wrong'); setLoading(false); return; }
@@ -142,7 +160,7 @@ function AuthPage({ onAuth }) {
   };
 
   const reset = m => { setMode(m); setError(''); setForm({ companyName:'', name:'', email:'', password:'', confirm:'', color:'#6366f1', resetToken:'' }); };
-
+  
   // ── Landing ──
   if (mode === 'landing') return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
@@ -214,6 +232,10 @@ function AuthPage({ onAuth }) {
                   ))}
                 </div>
               </div>
+            )}
+            {mode === 'register' && (
+              <div className="form-group"><label className="form-label">Your Avatar Image (optional)</label>
+                <input className="form-input" type="file" accept="image/*" onChange={e => setAvatarFile(e.target.files?.[0])} /></div>
             )}
             {error && (
               <div style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', borderRadius:8, padding:'10px 14px', color:'#ef4444', fontSize:13, marginBottom:16 }}>
@@ -548,11 +570,14 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         <div className="chart-card"><h3>By Status</h3><div className="chart-wrap"><canvas ref={doughnutRef}/></div></div>
         <div className="chart-card"><h3>By Priority</h3><div className="chart-wrap"><canvas ref={barRef}/></div></div>
       </div>
-      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20}}>
+      <div className="table-card" style={{padding:20}}>
         <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:16}}>Recent Issues</h3>
         {recentBugs.length===0?<div className="text-muted text-sm">No issues found.</div>:(
-          <table className="bug-table"><thead><tr><th>Key</th><th>Title</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Raised By</th><th>Updated</th></tr></thead>
+          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date</th><th>Issue Raised By</th><th>Issue Type</th><th>Issue Title</th><th>Assignee</th><th>Priority</th><th>Issue Status</th></tr></thead>
+          <tbody>{recentBugs.map(bug=>{const assignee=users.find(u=>u.id===bug.assigneeId);const reporter=users.find(u=>u.id===bug.reporterId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatDate(bug.createdAt)}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td><span className="issue-title">{bug.title}</span></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td></tr>);})}</tbody></table></div>
+          <div className="table-scroll" style={{display:'none'}}><table className="bug-table"><thead><tr><th>Date</th><th>Issue Raised By</th><th>Issue Type</th><th>Issue Title</th><th>Assignee</th><th>Priority</th><th>Issue Status</th></tr></thead>
           <tbody>{recentBugs.map(bug=>{const assignee=users.find(u=>u.id===bug.assigneeId);const reporter=users.find(u=>u.id===bug.reporterId);return(<tr key={bug.id} onClick={()=>setSelectedBug(bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><span className="text-muted text-sm">{timeAgo(bug.updatedAt)}</span></td></tr>);})}</tbody></table>
+          </div>
         )}
       </div>
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const nextStats = await api.get(url); setStats(nextStats); setSelectedBug(null); }}/>}
@@ -581,9 +606,12 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
         {Object.values(filters).some(v=>v)&&<button className="btn btn-ghost btn-sm" onClick={()=>setFilters({status:'',priority:'',type:'',assigneeId:'',search:''})}>Clear ✕</button>}
       </div>
       {bugs.length===0?<div className="empty-state"><div className="icon">🎉</div><h3>No issues found</h3><p>Try adjusting your filters or create a new issue.</p></div>:(
-        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',overflow:'hidden'}}>
-          <table className="bug-table"><thead><tr><th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Raised By</th><th>Project</th><th>Created</th></tr></thead>
+        <div className="table-card">
+          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date</th><th>Issue Raised By</th><th>Issue Type</th><th>Issue Title</th><th>Assignee</th><th>Priority</th><th>Issue Status</th></tr></thead>
+          <tbody>{bugs.map(bug=>{const assignee=users.find(u=>u.id===bug.assigneeId);const reporter=users.find(u=>u.id===bug.reporterId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatDate(bug.createdAt)}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td><TypeBadge t={bug.type}/></td><td><span className="issue-title">{bug.title}</span></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td></tr>);})}</tbody></table></div>
+          <div className="table-scroll" style={{display:'none'}}><table className="bug-table"><thead><tr><th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Raised By</th><th>Project</th><th>Created</th></tr></thead>
           <tbody>{bugs.map(bug=>{const assignee=users.find(u=>u.id===bug.assigneeId);const reporter=users.find(u=>u.id===bug.reporterId);const project=projects.find(p=>p.id===bug.projectId);return(<tr key={bug.id} onClick={()=>setSelectedBug(bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><TypeBadge t={bug.type}/></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td>{project&&<div style={{display:'flex',alignItems:'center',gap:5}}><div style={{width:8,height:8,borderRadius:'50%',background:project.color}}/><span style={{fontSize:12,color:'var(--muted)'}}>{project.name}</span></div>}</td><td><span className="text-muted text-sm">{timeAgo(bug.createdAt)}</span></td></tr>);})}</tbody></table>
+          </div>
         </div>
       )}
       {showCreate&&<BugModal projects={projects} users={users} currentProject={currentProject} onClose={()=>setShowCreate(false)} toast={toast} onSave={()=>{load();setShowCreate(false);}}/>}
@@ -663,7 +691,8 @@ function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
 function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ name:'', email:'', role:'developer', color:'#6366f1' });
+  const [form, setForm] = useState({ name:'', email:'', role:'developer', color:'#6366f1' }); // avatarDataUrl will be added to payload directly
+  const [avatarFile, setAvatarFile] = useState(null);
   const [newCredentials, setNewCredentials] = useState(null); // { name, email, tempPassword }
   const [resetTarget, setResetTarget] = useState(null); // member to reset password for
   const [resetResult, setResetResult] = useState(null);
@@ -675,7 +704,8 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
   const add = async e => {
     e.preventDefault();
     if (!form.name.trim() || !form.email.trim()) return;
-    const res = await api.post('/api/members', form);
+    const avatarDataUrl = avatarFile ? await readImageAsDataUrl(avatarFile) : null;
+    const res = await api.post('/api/members', { ...form, avatarDataUrl });
     if (res.error) { toast(res.error, 'error'); return; }
     // server returns { id, name, email, ..., tempPassword }
     const { tempPassword, ...member } = res;
@@ -801,6 +831,10 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser }) {
                 <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                   {COLORS.map(c=><div key={c} onClick={()=>setF('color',c)} style={{width:24,height:24,borderRadius:'50%',background:c,cursor:'pointer',border:form.color===c?'3px solid #fff':'3px solid transparent',transform:form.color===c?'scale(1.2)':'none',transition:'all .15s'}}/>)}
                 </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Avatar Image (optional)</label>
+                <input className="form-input" type="file" accept="image/*" onChange={e => setAvatarFile(e.target.files?.[0])} />
               </div>
               <div style={{background:'rgba(99,102,241,.08)',border:'1px solid rgba(99,102,241,.2)',borderRadius:8,padding:'10px 14px',fontSize:13,color:'var(--muted)'}}>
                 💡 A temporary password will be generated. Share it with the new member so they can log in and change it later.

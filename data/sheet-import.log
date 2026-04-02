@@ -1,0 +1,210 @@
+[2026-04-01T22:30:54.443Z] Downloading CSV for sheet HRMS
+[2026-04-01T22:30:55.758Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:30:55.784Z] Normalized sheets: HRMS:101
+[2026-04-01T22:30:57.110Z] Preparing users for 9 assignee names
+[2026-04-01T22:30:58.068Z] User preparation committed
+[2026-04-01T22:30:58.069Z] Processing sheet: HRMS (101 rows)
+[2026-04-01T22:30:58.313Z] Prepared 101 inserts for HRMS; skipped 0
+[2026-04-01T22:30:58.365Z] Inserting batch of 101 into HRMS
+[2026-04-01T22:30:58.635Z] Committed sheet HRMS: imported 101, skipped 0
+[2026-04-01T22:31:40.410Z] Downloading CSV for sheet Subscription
+[2026-04-01T22:31:42.607Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:31:42.619Z] Normalized sheets: Subscription:18
+[2026-04-01T22:31:43.226Z] Preparing users for 3 assignee names
+[2026-04-01T22:31:43.479Z] User preparation committed
+[2026-04-01T22:31:43.480Z] Processing sheet: Subscription (18 rows)
+[2026-04-01T22:31:43.666Z] Prepared 18 inserts for Subscription; skipped 0
+[2026-04-01T22:31:43.712Z] Inserting batch of 18 into Subscription
+[2026-04-01T22:31:43.850Z] Committed sheet Subscription: imported 18, skipped 0
+[2026-04-01T22:31:47.444Z] Downloading CSV for sheet Logistics
+[2026-04-01T22:31:48.868Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:31:48.879Z] Normalized sheets: Logistics:26
+[2026-04-01T22:31:49.725Z] Preparing users for 0 assignee names
+[2026-04-01T22:31:49.778Z] User preparation committed
+[2026-04-01T22:31:49.779Z] Processing sheet: Logistics (26 rows)
+[2026-04-01T22:31:49.993Z] Prepared 26 inserts for Logistics; skipped 0
+[2026-04-01T22:31:50.041Z] Inserting batch of 26 into Logistics
+[2026-04-01T22:31:50.241Z] Committed sheet Logistics: imported 26, skipped 0
+[2026-04-01T22:31:53.033Z] Downloading CSV for sheet RMS
+[2026-04-01T22:31:54.877Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:31:54.897Z] Normalized sheets: RMS:74
+[2026-04-01T22:31:55.521Z] Preparing users for 0 assignee names
+[2026-04-01T22:31:55.569Z] User preparation committed
+[2026-04-01T22:31:55.570Z] Processing sheet: RMS (74 rows)
+[2026-04-01T22:31:55.771Z] Prepared 74 inserts for RMS; skipped 0
+[2026-04-01T22:31:55.821Z] Inserting batch of 74 into RMS
+[2026-04-01T22:31:56.083Z] Committed sheet RMS: imported 74, skipped 0
+[2026-04-01T22:31:58.309Z] Downloading CSV for sheet CANTEEN
+[2026-04-01T22:31:59.617Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:31:59.640Z] Normalized sheets: CANTEEN:132
+[2026-04-01T22:32:00.252Z] Preparing users for 0 assignee names
+[2026-04-01T22:32:00.309Z] User preparation committed
+[2026-04-01T22:32:00.310Z] Processing sheet: CANTEEN (132 rows)
+[2026-04-01T22:32:00.507Z] Prepared 95 inserts for CANTEEN; skipped 37
+[2026-04-01T22:32:00.556Z] Inserting batch of 95 into CANTEEN
+[2026-04-01T22:32:00.773Z] Committed sheet CANTEEN: imported 95, skipped 37
+[2026-04-01T22:32:02.562Z] Downloading CSV for sheet Priority-New request
+[2026-04-01T22:32:03.851Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:03.860Z] Normalized sheets: Priority-New request:7
+[2026-04-01T22:32:04.476Z] Preparing users for 4 assignee names
+[2026-04-01T22:32:04.833Z] User preparation committed
+[2026-04-01T22:32:04.834Z] Processing sheet: Priority-New request (7 rows)
+[2026-04-01T22:32:05.037Z] Prepared 7 inserts for Priority-New request; skipped 0
+[2026-04-01T22:32:05.086Z] Inserting batch of 7 into Priority-New request
+[2026-04-01T22:32:05.241Z] Committed sheet Priority-New request: imported 7, skipped 0
+[2026-04-01T22:32:07.370Z] Downloading CSV for sheet mPOS
+[2026-04-01T22:32:08.741Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:08.778Z] Normalized sheets: mPOS:191
+[2026-04-01T22:32:09.579Z] Preparing users for 8 assignee names
+[2026-04-01T22:32:10.119Z] User preparation committed
+[2026-04-01T22:32:10.120Z] Processing sheet: mPOS (191 rows)
+[2026-04-01T22:32:10.319Z] Prepared 191 inserts for mPOS; skipped 0
+[2026-04-01T22:32:10.366Z] Inserting batch of 191 into mPOS
+[2026-04-01T22:32:10.631Z] Committed sheet mPOS: imported 191, skipped 0
+[2026-04-01T22:32:12.744Z] Downloading CSV for sheet Dyno_3PL
+[2026-04-01T22:32:14.114Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:14.123Z] Normalized sheets: Dyno_3PL:10
+[2026-04-01T22:32:14.723Z] Preparing users for 5 assignee names
+[2026-04-01T22:32:15.124Z] User preparation committed
+[2026-04-01T22:32:15.125Z] Processing sheet: Dyno_3PL (10 rows)
+[2026-04-01T22:32:15.302Z] Prepared 10 inserts for Dyno_3PL; skipped 0
+[2026-04-01T22:32:15.348Z] Inserting batch of 10 into Dyno_3PL
+[2026-04-01T22:32:15.479Z] Committed sheet Dyno_3PL: imported 10, skipped 0
+[2026-04-01T22:32:17.586Z] Downloading CSV for sheet WEB POS
+[2026-04-01T22:32:19.034Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:19.060Z] Normalized sheets: WEB POS:103
+[2026-04-01T22:32:19.732Z] Preparing users for 17 assignee names
+[2026-04-01T22:32:20.601Z] User preparation committed
+[2026-04-01T22:32:20.602Z] Processing sheet: WEB POS (103 rows)
+[2026-04-01T22:32:20.795Z] Prepared 103 inserts for WEB POS; skipped 0
+[2026-04-01T22:32:20.843Z] Inserting batch of 103 into WEB POS
+[2026-04-01T22:32:21.090Z] Committed sheet WEB POS: imported 103, skipped 0
+[2026-04-01T22:32:23.427Z] Downloading CSV for sheet Access control
+[2026-04-01T22:32:24.929Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:24.944Z] Normalized sheets: Access control:52
+[2026-04-01T22:32:25.648Z] Preparing users for 8 assignee names
+[2026-04-01T22:32:26.057Z] User preparation committed
+[2026-04-01T22:32:26.058Z] Processing sheet: Access control (52 rows)
+[2026-04-01T22:32:26.245Z] Prepared 52 inserts for Access control; skipped 0
+[2026-04-01T22:32:26.290Z] Inserting batch of 52 into Access control
+[2026-04-01T22:32:26.476Z] Committed sheet Access control: imported 52, skipped 0
+[2026-04-01T22:32:28.664Z] Downloading CSV for sheet Bundle
+[2026-04-01T22:32:30.135Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:30.146Z] Normalized sheets: Bundle:17
+[2026-04-01T22:32:30.834Z] Preparing users for 4 assignee names
+[2026-04-01T22:32:30.974Z] User preparation committed
+[2026-04-01T22:32:30.975Z] Processing sheet: Bundle (17 rows)
+[2026-04-01T22:32:31.163Z] Prepared 17 inserts for Bundle; skipped 0
+[2026-04-01T22:32:31.212Z] Inserting batch of 17 into Bundle
+[2026-04-01T22:32:31.550Z] Committed sheet Bundle: imported 17, skipped 0
+[2026-04-01T22:32:33.518Z] Downloading CSV for sheet M-RMS APP
+[2026-04-01T22:32:35.003Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:35.042Z] Normalized sheets: M-RMS APP:215
+[2026-04-01T22:32:35.672Z] Preparing users for 19 assignee names
+[2026-04-01T22:32:35.993Z] User preparation committed
+[2026-04-01T22:32:35.994Z] Processing sheet: M-RMS APP (215 rows)
+[2026-04-01T22:32:36.188Z] Prepared 215 inserts for M-RMS APP; skipped 0
+[2026-04-01T22:32:36.235Z] Inserting batch of 215 into M-RMS APP
+[2026-04-01T22:32:36.522Z] Committed sheet M-RMS APP: imported 215, skipped 0
+[2026-04-01T22:32:38.267Z] Downloading CSV for sheet Ticket Mgmt
+[2026-04-01T22:32:39.573Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:39.586Z] Normalized sheets: Ticket Mgmt:29
+[2026-04-01T22:32:40.343Z] Preparing users for 1 assignee names
+[2026-04-01T22:32:40.482Z] User preparation committed
+[2026-04-01T22:32:40.482Z] Processing sheet: Ticket Mgmt (29 rows)
+[2026-04-01T22:32:40.672Z] Prepared 29 inserts for Ticket Mgmt; skipped 0
+[2026-04-01T22:32:40.721Z] Inserting batch of 29 into Ticket Mgmt
+[2026-04-01T22:32:40.906Z] Committed sheet Ticket Mgmt: imported 29, skipped 0
+[2026-04-01T22:32:44.351Z] Downloading CSV for sheet Offline POS
+[2026-04-01T22:32:45.624Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:45.643Z] Normalized sheets: Offline POS:57
+[2026-04-01T22:32:46.275Z] Preparing users for 7 assignee names
+[2026-04-01T22:32:46.611Z] User preparation committed
+[2026-04-01T22:32:46.611Z] Processing sheet: Offline POS (57 rows)
+[2026-04-01T22:32:46.797Z] Prepared 57 inserts for Offline POS; skipped 0
+[2026-04-01T22:32:46.842Z] Inserting batch of 57 into Offline POS
+[2026-04-01T22:32:47.026Z] Committed sheet Offline POS: imported 57, skipped 0
+[2026-04-01T22:32:48.689Z] Downloading CSV for sheet TWINLEAVES WEBSITE
+[2026-04-01T22:32:50.090Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:32:50.093Z] Normalized sheets: 
+[2026-04-01T22:33:32.290Z] Downloading CSV for sheet BACKOFFICE
+[2026-04-01T22:33:33.875Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:33:33.885Z] Normalized sheets: BACKOFFICE:19
+[2026-04-01T22:33:34.589Z] Preparing users for 9 assignee names
+[2026-04-01T22:33:35.489Z] User preparation committed
+[2026-04-01T22:33:35.490Z] Processing sheet: BACKOFFICE (19 rows)
+[2026-04-01T22:33:35.668Z] Prepared 19 inserts for BACKOFFICE; skipped 0
+[2026-04-01T22:33:35.713Z] Inserting batch of 19 into BACKOFFICE
+[2026-04-01T22:33:35.855Z] Committed sheet BACKOFFICE: imported 19, skipped 0
+[2026-04-01T22:33:38.358Z] Downloading CSV for sheet B2C APP
+[2026-04-01T22:33:39.810Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:33:39.830Z] Normalized sheets: B2C APP:89
+[2026-04-01T22:33:40.452Z] Preparing users for 1 assignee names
+[2026-04-01T22:33:40.498Z] User preparation committed
+[2026-04-01T22:33:40.498Z] Processing sheet: B2C APP (89 rows)
+[2026-04-01T22:33:40.680Z] Prepared 89 inserts for B2C APP; skipped 0
+[2026-04-01T22:33:40.726Z] Inserting batch of 89 into B2C APP
+[2026-04-01T22:33:40.908Z] Committed sheet B2C APP: imported 89, skipped 0
+[2026-04-01T22:33:43.313Z] Downloading CSV for sheet B2C Web(Restaurant)
+[2026-04-01T22:33:44.780Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:33:44.793Z] Normalized sheets: B2C Web(Restaurant):32
+[2026-04-01T22:33:45.422Z] Preparing users for 6 assignee names
+[2026-04-01T22:33:45.650Z] User preparation committed
+[2026-04-01T22:33:45.651Z] Processing sheet: B2C Web(Restaurant) (32 rows)
+[2026-04-01T22:33:45.832Z] Prepared 32 inserts for B2C Web(Restaurant); skipped 0
+[2026-04-01T22:33:45.876Z] Inserting batch of 32 into B2C Web(Restaurant)
+[2026-04-01T22:33:46.066Z] Committed sheet B2C Web(Restaurant): imported 32, skipped 0
+[2026-04-01T22:33:48.129Z] Downloading CSV for sheet store QR
+[2026-04-01T22:33:49.367Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:33:49.382Z] Normalized sheets: store QR:53
+[2026-04-01T22:33:50.038Z] Preparing users for 5 assignee names
+[2026-04-01T22:33:50.187Z] User preparation committed
+[2026-04-01T22:33:50.188Z] Processing sheet: store QR (53 rows)
+[2026-04-01T22:33:50.373Z] Prepared 53 inserts for store QR; skipped 0
+[2026-04-01T22:33:50.420Z] Inserting batch of 53 into store QR
+[2026-04-01T22:33:50.621Z] Committed sheet store QR: imported 53, skipped 0
+[2026-04-01T22:33:52.547Z] Downloading CSV for sheet QR Dine
+[2026-04-01T22:33:54.113Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:33:54.122Z] Normalized sheets: QR Dine:12
+[2026-04-01T22:33:54.889Z] Preparing users for 4 assignee names
+[2026-04-01T22:33:54.934Z] User preparation committed
+[2026-04-01T22:33:54.935Z] Processing sheet: QR Dine (12 rows)
+[2026-04-01T22:33:55.119Z] Prepared 12 inserts for QR Dine; skipped 0
+[2026-04-01T22:33:55.164Z] Inserting batch of 12 into QR Dine
+[2026-04-01T22:33:55.299Z] Committed sheet QR Dine: imported 12, skipped 0
+[2026-04-01T22:33:57.313Z] Downloading CSV for sheet Digirack App
+[2026-04-01T22:33:58.732Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:33:58.746Z] Normalized sheets: Digirack App:33
+[2026-04-01T22:33:59.406Z] Preparing users for 6 assignee names
+[2026-04-01T22:33:59.452Z] User preparation committed
+[2026-04-01T22:33:59.453Z] Processing sheet: Digirack App (33 rows)
+[2026-04-01T22:33:59.639Z] Prepared 33 inserts for Digirack App; skipped 0
+[2026-04-01T22:33:59.686Z] Inserting batch of 33 into Digirack App
+[2026-04-01T22:33:59.874Z] Committed sheet Digirack App: imported 33, skipped 0
+[2026-04-01T22:34:02.934Z] Downloading CSV for sheet Hyperlocal
+[2026-04-01T22:34:04.435Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:34:04.444Z] Normalized sheets: Hyperlocal:12
+[2026-04-01T22:34:05.100Z] Preparing users for 1 assignee names
+[2026-04-01T22:34:05.149Z] User preparation committed
+[2026-04-01T22:34:05.150Z] Processing sheet: Hyperlocal (12 rows)
+[2026-04-01T22:34:05.344Z] Prepared 12 inserts for Hyperlocal; skipped 0
+[2026-04-01T22:34:05.391Z] Inserting batch of 12 into Hyperlocal
+[2026-04-01T22:34:05.536Z] Committed sheet Hyperlocal: imported 12, skipped 0
+[2026-04-01T22:34:09.025Z] Downloading CSV for sheet WhatsappCommerce
+[2026-04-01T22:34:10.347Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:34:10.358Z] Normalized sheets: WhatsappCommerce:21
+[2026-04-01T22:34:11.020Z] Preparing users for 5 assignee names
+[2026-04-01T22:34:11.067Z] User preparation committed
+[2026-04-01T22:34:11.068Z] Processing sheet: WhatsappCommerce (21 rows)
+[2026-04-01T22:34:11.259Z] Prepared 21 inserts for WhatsappCommerce; skipped 0
+[2026-04-01T22:34:11.307Z] Inserting batch of 21 into WhatsappCommerce
+[2026-04-01T22:34:11.463Z] Committed sheet WhatsappCommerce: imported 21, skipped 0
+[2026-04-01T22:34:14.457Z] Downloading CSV for sheet B2C (durai store)
+[2026-04-01T22:34:15.927Z] Workbook extracted (1 sheet payloads)
+[2026-04-01T22:34:15.938Z] Normalized sheets: B2C (durai store):15
+[2026-04-01T22:34:16.585Z] Preparing users for 1 assignee names
+[2026-04-01T22:34:16.631Z] User preparation committed
+[2026-04-01T22:34:16.632Z] Processing sheet: B2C (durai store) (15 rows)
+[2026-04-01T22:34:16.818Z] Prepared 15 inserts for B2C (durai store); skipped 0
+[2026-04-01T22:34:16.867Z] Inserting batch of 15 into B2C (durai store)
+[2026-04-01T22:34:17.022Z] Committed sheet B2C (durai store): imported 15, skipped 0

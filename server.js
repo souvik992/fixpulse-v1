@@ -146,16 +146,17 @@ async function enforceIssueWritePermissions(req, bug, changes) {
 
 app.post('/api/auth/register-company', async (req, res) => {
   try {
-    const { companyName, name, email, password, color = '#6366f1' } = req.body;
+    const { companyName, name, email, password, color = '#6366f1', avatarDataUrl } = req.body;
     if (!companyName || !name || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
+    if (avatarDataUrl && !avatarDataUrl.startsWith('data:image/')) return res.status(400).json({ error: 'Invalid avatar data URL' });
 
     const hash = await bcrypt.hash(password, 10);
-    const avatar = name.split(' ').map((word) => word[0]).join('').toUpperCase().slice(0, 2);
+    const avatar = avatarDataUrl || name.split(' ').map((word) => word[0]).join('').toUpperCase().slice(0, 2);
     let slug = slugify(companyName);
 
     const existingOrg = await db.query('SELECT id FROM organizations WHERE slug=$1', [slug]);
@@ -178,7 +179,7 @@ app.post('/api/auth/register-company', async (req, res) => {
     const {
       rows: [user],
     } = await db.query(
-      "INSERT INTO users (org_id,name,email,avatar,color,password_hash,role) VALUES ($1,$2,$3,$4,$5,$6,'admin') RETURNING *",
+      "INSERT INTO users (org_id,name,email,avatar,color,password_hash,role) VALUES ($1,$2,$3,$4,$5,$6,'admin') RETURNING *", // Use avatarDataUrl if provided, else initials
       [org.id, name, email, avatar, color, hash]
     );
     await assignSystemRole(user.id, 'Admin', org.id);
@@ -340,7 +341,7 @@ app.get('/api/members', auth, async (req, res) => {
 
 app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
-    const { name, email, role = 'developer', color = '#6366f1', password } = req.body;
+    const { name, email, role = 'developer', color = '#6366f1', password, avatarDataUrl } = req.body;
     const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'frontend_developer', 'backend_developer', 'tester', 'viewer', 'qa']);
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email required' });
@@ -351,7 +352,7 @@ app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async 
 
     const tempPassword = password || 'Welcome@123';
     const hash = await bcrypt.hash(tempPassword, 10);
-    const avatar = name.split(' ').map((word) => word[0]).join('').toUpperCase().slice(0, 2);
+    const avatar = avatarDataUrl || name.split(' ').map((word) => word[0]).join('').toUpperCase().slice(0, 2);
 
     const exists = await db.query('SELECT id FROM users WHERE email=$1', [email]);
     if (exists.rows.length) {
@@ -360,7 +361,7 @@ app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async 
 
     const { rows } = await db.query(
       'INSERT INTO users (org_id,name,email,avatar,color,password_hash,role) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [req.user.orgId, name, email, avatar, color, hash, role]
+      [req.user.orgId, name, email, avatar, color, hash, role] // Use avatarDataUrl if provided, else initials
     );
 
     // Sync RBAC: assign matching system role
@@ -375,14 +376,15 @@ app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async 
 
 app.put('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
-    const { name, role, color } = req.body;
+    const { name, role, color, avatarDataUrl } = req.body;
     const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'frontend_developer', 'backend_developer', 'tester', 'viewer', 'qa']);
     if (role && !allowedRoles.has(role)) {
       return res.status(400).json({ error: 'Unsupported role' });
     }
+    if (avatarDataUrl && !avatarDataUrl.startsWith('data:image/')) return res.status(400).json({ error: 'Invalid avatar data URL' });
     const { rows } = await db.query(
-      'UPDATE users SET name=COALESCE($1,name),role=COALESCE($2,role),color=COALESCE($3,color) WHERE id=$4 AND org_id=$5 RETURNING *',
-      [name, role, color, req.params.id, req.user.orgId]
+      'UPDATE users SET name=COALESCE($1,name),role=COALESCE($2,role),color=COALESCE($3,color),avatar=COALESCE($6,avatar) WHERE id=$4 AND org_id=$5 RETURNING *',
+      [name, role, color, req.params.id, req.user.orgId, avatarDataUrl]
     );
 
     if (!rows.length) {
