@@ -379,7 +379,8 @@ app.post('/api/auth/login', async (req, res) => {
               o.data_source_file_name AS org_data_source_file_name,
               o.data_source_sync_enabled AS org_data_source_sync_enabled,
               o.data_source_last_synced_at AS org_data_source_last_synced_at,
-              o.data_source_last_error AS org_data_source_last_error
+              o.data_source_last_error AS org_data_source_last_error,
+              o.apps_script_url AS org_apps_script_url
        FROM users u
        JOIN organizations o ON o.id=u.org_id
        WHERE u.email=$1`,
@@ -414,6 +415,7 @@ app.post('/api/auth/login', async (req, res) => {
       data_source_sync_enabled: user.orgDataSourceSyncEnabled,
       data_source_last_synced_at: user.orgDataSourceLastSyncedAt,
       data_source_last_error: user.orgDataSourceLastError,
+      apps_script_url: user.orgAppsScriptUrl,
     });
     const token = jwt.sign(
       { id: user.id, orgId: user.orgId, email: user.email, name: user.name, role: user.role },
@@ -443,7 +445,8 @@ app.get('/api/auth/me', auth, async (req, res) => {
               o.data_source_file_name AS org_data_source_file_name,
               o.data_source_sync_enabled AS org_data_source_sync_enabled,
               o.data_source_last_synced_at AS org_data_source_last_synced_at,
-              o.data_source_last_error AS org_data_source_last_error
+              o.data_source_last_error AS org_data_source_last_error,
+              o.apps_script_url AS org_apps_script_url
        FROM users u
        JOIN organizations o ON o.id=u.org_id
        WHERE u.id=$1`,
@@ -470,6 +473,7 @@ app.get('/api/auth/me', auth, async (req, res) => {
       data_source_sync_enabled: user.orgDataSourceSyncEnabled,
       data_source_last_synced_at: user.orgDataSourceLastSyncedAt,
       data_source_last_error: user.orgDataSourceLastError,
+      apps_script_url: user.orgAppsScriptUrl,
     });
     res.json({ user: strip(user), org });
   } catch (error) {
@@ -997,10 +1001,16 @@ app.post('/api/projects', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), asy
     );
 
     // Add tab to linked XLSX (if any) and push to Apps Script (if configured)
-    addProjectTabToSheet(req.user.orgId, name).catch(() => {});
+    addProjectTabToSheet(req.user.orgId, name).catch(e => console.error('[sheet] addProjectTab error:', e.message));
     db.query('SELECT apps_script_url FROM organizations WHERE id=$1', [req.user.orgId])
-      .then(({ rows: r }) => { if (r[0]?.apps_script_url) pushNewTabToAppsScript(r[0].apps_script_url, name).catch(() => {}); })
-      .catch(() => {});
+      .then(({ rows: r }) => {
+        const url = r[0]?.apps_script_url;
+        console.log('[sheet] apps_script_url for org:', url || '(none)');
+        if (url) pushNewTabToAppsScript(url, name)
+          .then(res => console.log('[sheet] pushNewTab response:', JSON.stringify(res)))
+          .catch(e => console.error('[sheet] pushNewTab error:', e.message));
+      })
+      .catch(e => console.error('[sheet] org query error:', e.message));
 
     res.status(201).json(project);
   } catch (error) {
@@ -1633,11 +1643,18 @@ app.post('/api/sheet-push', auth, async (req, res) => {
   try {
     const { rows } = await db.query('SELECT apps_script_url FROM organizations WHERE id=$1', [req.user.orgId]);
     const url = rows[0]?.apps_script_url;
+    console.log('[sheet-push] url:', url || '(none)');
     if (!url) return res.status(400).json({ error: 'No Apps Script URL configured in Settings.' });
     const projectId = req.body?.projectId || null;
-    const result = await pushToAppsScript(req.user.orgId, url, 'push_all', projectId);
-    res.json({ ok: true, result });
+    const result = await pushToAppsScript(req.user.orgId, url, projectId);
+    console.log('[sheet-push] result:', JSON.stringify(result));
+    if (result?.nothing) return res.json({ nothing: true });
+    if (result?.pushedIds?.length) {
+      await db.query('UPDATE bugs SET sheet_pushed_at = NOW() WHERE id = ANY($1)', [result.pushedIds]);
+    }
+    res.json({ ok: true });
   } catch (error) {
+    console.error('[sheet-push] error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1659,12 +1676,12 @@ app.get('/api/sheet-export', auth, async (req, res) => {
 
 app.get('/', (req, res) => {
   if (hasTokenMarkerCookie(req)) {
-    return res.sendFile(path.join(__dirname, 'public', 'login.html'));
+    return res.sendFile(path.join(__dirname, 'public', 'app-shell.html'));
   }
   return res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
-app.get('/app',   (_req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
+app.get('/app',   (_req, res) => res.sendFile(path.join(__dirname, 'public', 'app-shell.html')));
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -1674,6 +1691,7 @@ app.get('*', (req, res) => {
   try {
     await db.connect();
     await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS apps_script_url TEXT`);
+    await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS sheet_pushed_at TIMESTAMPTZ`);
     app.listen(PORT, () => {
       console.log(`\nBugTracker      ->  http://localhost:${PORT}`);
       console.log('Storage         ->  PostgreSQL');

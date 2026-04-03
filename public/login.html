@@ -7,16 +7,429 @@
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <link rel="shortcut icon" href="/favicon.ico" />
   <link rel="apple-touch-icon" href="/fixpulse-favicon-source.png" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-  <link rel="stylesheet" href="/styles.css" />
   <script>
-    (function(){localStorage.setItem('bt_theme','light');document.documentElement.setAttribute('data-theme','light');})();
+    (function () {
+      var token = localStorage.getItem('bt_token');
+      if (token) {
+        document.cookie = 'bt_has_token=1; path=/; max-age=' + (60 * 60 * 24 * 365) + '; SameSite=Lax';
+        window.location.replace('/app');
+      }
+      document.documentElement.setAttribute('data-theme', 'light');
+    })();
   </script>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-soft: #eef3f8;
+      --text: #12233c;
+      --muted: #66758d;
+      --line: #d7e0eb;
+      --primary: #1f6bff;
+      --primary-deep: #1550c4;
+      --accent: #12a05c;
+      --danger: #e24b4b;
+      --radius: 18px;
+      --shadow: 0 24px 48px rgba(16, 35, 60, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: linear-gradient(180deg, #f8fbff 0%, #f2f5fa 100%);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px 18px;
+    }
+    .auth-shell {
+      width: min(1040px, 100%);
+      display: grid;
+      grid-template-columns: minmax(320px, 1.05fr) minmax(320px, 0.95fr);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .auth-brand {
+      padding: 42px;
+      background: radial-gradient(circle at top right, rgba(31,107,255,0.12), transparent 42%), linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 28px;
+    }
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 800;
+      font-size: 28px;
+      letter-spacing: -0.04em;
+    }
+    .brand-row img {
+      width: 54px;
+      height: 54px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      object-fit: contain;
+      padding: 4px;
+    }
+    .auth-brand h1 {
+      margin: 0;
+      font-size: clamp(34px, 4vw, 52px);
+      line-height: 1.02;
+      letter-spacing: -0.06em;
+    }
+    .auth-brand p {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.7;
+      max-width: 440px;
+    }
+    .brand-points {
+      display: grid;
+      gap: 12px;
+    }
+    .brand-point {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--text);
+    }
+    .brand-point span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+    .auth-card {
+      padding: 34px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .tabs {
+      display: inline-grid;
+      grid-template-columns: 1fr 1fr;
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 4px;
+      gap: 4px;
+      margin-bottom: 24px;
+    }
+    .tab-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 10px;
+      padding: 11px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: 0 1px 3px rgba(16, 35, 60, 0.08);
+    }
+    .auth-card h2 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      letter-spacing: -0.04em;
+    }
+    .auth-card p {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .form-grid {
+      display: grid;
+      gap: 14px;
+    }
+    .field {
+      display: grid;
+      gap: 7px;
+    }
+    .field label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .field input {
+      width: 100%;
+      height: 46px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0 14px;
+      font-size: 14px;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+    }
+    .field input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(31, 107, 255, 0.12);
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 6px;
+    }
+    .submit-btn, .ghost-btn {
+      height: 46px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 0 18px;
+      cursor: pointer;
+    }
+    .submit-btn {
+      border: 1px solid var(--primary);
+      background: var(--primary);
+      color: #fff;
+      min-width: 148px;
+    }
+    .submit-btn:hover { background: var(--primary-deep); border-color: var(--primary-deep); }
+    .submit-btn[disabled] { opacity: 0.75; cursor: wait; }
+    .ghost-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .error, .success {
+      font-size: 13px;
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .error {
+      background: rgba(226, 75, 75, 0.08);
+      border: 1px solid rgba(226, 75, 75, 0.18);
+      color: #a32d2d;
+    }
+    .success {
+      background: rgba(18, 160, 92, 0.09);
+      border: 1px solid rgba(18, 160, 92, 0.18);
+      color: #147447;
+    }
+    .helper {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .loading-ring {
+      width: 14px;
+      height: 14px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    .hidden { display: none !important; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 900px) {
+      .auth-shell { grid-template-columns: 1fr; }
+      .auth-brand { border-right: none; border-bottom: 1px solid var(--line); padding: 30px; }
+      .auth-card { padding: 28px 22px; }
+    }
+  </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel" src="/app.js"></script>
+  <div class="auth-shell">
+    <section class="auth-brand">
+      <div>
+        <div class="brand-row">
+          <img src="/fixpulse-logo-small.png" alt="FixPulse" width="54" height="54" />
+          <span>FixPulse</span>
+        </div>
+        <h1>Sign in faster and get straight to your issues.</h1>
+        <p>Clean bug tracking for teams that want clarity, not clutter. Use your workspace credentials to continue, or create a new company space in a few seconds.</p>
+      </div>
+      <div class="brand-points">
+        <div class="brand-point"><span></span><strong>Instant access</strong> to projects, issues, reports, and team workflows</div>
+        <div class="brand-point"><span></span><strong>Lightweight sign-in page</strong> that loads before the full app shell</div>
+        <div class="brand-point"><span></span><strong>New workspace setup</strong> for admins starting a fresh organization</div>
+      </div>
+    </section>
+    <section class="auth-card">
+      <div class="tabs">
+        <button class="tab-btn active" type="button" data-mode="login">Sign In</button>
+        <button class="tab-btn" type="button" data-mode="register">Register</button>
+      </div>
+      <div id="errorBox" class="error"></div>
+      <div id="successBox" class="success"></div>
+
+      <div id="loginPanel">
+        <h2>Welcome back</h2>
+        <p>Use your email and password to open your FixPulse workspace.</p>
+        <form id="loginForm" class="form-grid">
+          <div class="field">
+            <label for="loginEmail">Email</label>
+            <input id="loginEmail" name="email" type="email" autocomplete="email" required />
+          </div>
+          <div class="field">
+            <label for="loginPassword">Password</label>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" required />
+          </div>
+          <div class="actions">
+            <button id="loginButton" class="submit-btn" type="submit">Sign In</button>
+            <a class="ghost-btn" href="/">Back Home</a>
+          </div>
+        </form>
+        <div class="helper">If your password was reset by an admin, use the temporary password first and then update it from Profile Settings after sign-in.</div>
+      </div>
+
+      <div id="registerPanel" class="hidden">
+        <h2>Create a workspace</h2>
+        <p>Start a new organization with an admin account. You can add the rest of your team after sign-in.</p>
+        <form id="registerForm" class="form-grid">
+          <div class="field">
+            <label for="companyName">Company Name</label>
+            <input id="companyName" name="companyName" type="text" autocomplete="organization" required />
+          </div>
+          <div class="field">
+            <label for="registerName">Admin Name</label>
+            <input id="registerName" name="name" type="text" autocomplete="name" required />
+          </div>
+          <div class="field">
+            <label for="registerEmail">Work Email</label>
+            <input id="registerEmail" name="email" type="email" autocomplete="email" required />
+          </div>
+          <div class="field">
+            <label for="registerPassword">Password</label>
+            <input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="6" required />
+          </div>
+          <div class="actions">
+            <button id="registerButton" class="submit-btn" type="submit">Create Workspace</button>
+            <a class="ghost-btn" href="/">Back Home</a>
+          </div>
+        </form>
+      </div>
+    </section>
+  </div>
+  <script>
+    (function () {
+      var loginPanel = document.getElementById('loginPanel');
+      var registerPanel = document.getElementById('registerPanel');
+      var tabs = Array.from(document.querySelectorAll('.tab-btn'));
+      var errorBox = document.getElementById('errorBox');
+      var successBox = document.getElementById('successBox');
+      var loginButton = document.getElementById('loginButton');
+      var registerButton = document.getElementById('registerButton');
+
+      function showMessage(target, text) {
+        clearMessages();
+        if (!text) return;
+        target.textContent = text;
+        target.style.display = 'block';
+      }
+      function clearMessages() {
+        errorBox.style.display = 'none';
+        successBox.style.display = 'none';
+        errorBox.textContent = '';
+        successBox.textContent = '';
+      }
+      function setMode(mode) {
+        tabs.forEach(function (tab) {
+          tab.classList.toggle('active', tab.dataset.mode === mode);
+        });
+        loginPanel.classList.toggle('hidden', mode !== 'login');
+        registerPanel.classList.toggle('hidden', mode !== 'register');
+        clearMessages();
+      }
+      function setLoading(button, loading, label) {
+        button.disabled = loading;
+        button.innerHTML = loading ? '<span class="loading-ring"></span>' + label : label;
+      }
+      function persistToken(token) {
+        localStorage.setItem('bt_token', token);
+        document.cookie = 'bt_has_token=1; path=/; max-age=' + (60 * 60 * 24 * 365) + '; SameSite=Lax';
+      }
+
+      tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+          setMode(tab.dataset.mode);
+        });
+      });
+
+      document.getElementById('loginForm').addEventListener('submit', async function (event) {
+        event.preventDefault();
+        clearMessages();
+        setLoading(loginButton, true, 'Signing In...');
+        try {
+          var payload = {
+            email: event.target.email.value.trim(),
+            password: event.target.password.value
+          };
+          var response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          var data = await response.json();
+          if (!response.ok || data.error || !data.token) {
+            throw new Error(data.error || 'Unable to sign in');
+          }
+          persistToken(data.token);
+          window.location.replace('/app');
+        } catch (error) {
+          showMessage(errorBox, error.message || 'Unable to sign in');
+          setLoading(loginButton, false, 'Sign In');
+        }
+      });
+
+      document.getElementById('registerForm').addEventListener('submit', async function (event) {
+        event.preventDefault();
+        clearMessages();
+        setLoading(registerButton, true, 'Creating Workspace...');
+        try {
+          var payload = {
+            companyName: event.target.companyName.value.trim(),
+            name: event.target.name.value.trim(),
+            email: event.target.email.value.trim(),
+            password: event.target.password.value
+          };
+          var response = await fetch('/api/auth/register-company', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          var data = await response.json();
+          if (!response.ok || data.error || !data.token) {
+            throw new Error(data.error || 'Unable to create workspace');
+          }
+          persistToken(data.token);
+          showMessage(successBox, 'Workspace created. Redirecting to your app...');
+          window.location.replace('/app');
+        } catch (error) {
+          showMessage(errorBox, error.message || 'Unable to create workspace');
+          setLoading(registerButton, false, 'Create Workspace');
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

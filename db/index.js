@@ -17,6 +17,9 @@ async function connect() {
       };
 
   pool = new Pool(config);
+  pool.on('error', (err) => {
+    console.error('[db] Idle client error:', err.message);
+  });
 
   try {
     await pool.query('SELECT 1');

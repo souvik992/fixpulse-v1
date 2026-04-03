@@ -337,7 +337,15 @@ function makeProjectKey(name, usedKeys) {
 }
 
 function buildIssueRecord(sheetName, rowNumber, headerMap, row) {
-  const inferredCreatedAt = extractRowCreatedDate(row);
+  // Prefer a specific "Date / Raised Date / Issue Date" column over scanning all cells,
+  // because scan-all-cells picks up the first date it finds (could be a "Fixed" or "Deploy" date).
+  const specificDateRaw = getByHeader(row, headerMap, [
+    /^date$/, /^issue date$/, /^raised date$/, /^reported date$/, /^bug date$/,
+    /^created date$/, /^open date$/, /^logged date$/, /^entry date$/,
+  ]);
+  const inferredCreatedAt = specificDateRaw
+    ? parseSheetDateToIso(specificDateRaw)
+    : extractRowCreatedDate(row);
   const raw = {
     date: inferredCreatedAt ? parseExcelDate(inferredCreatedAt.slice(0, 10)) : '',
     raisedBy: getByHeader(row, headerMap, [/^issue raised by$/, /^raised by$/, /^qa owner$/, /^tested by$/]),

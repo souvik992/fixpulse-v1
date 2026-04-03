@@ -179,7 +179,12 @@ function httpsPost(url, data, redirectsLeft = 5) {
  * Build the sheets payload (same shape for both add_tab and push_all)
  * and post it to the org's configured Apps Script Web App URL.
  */
-async function pushToAppsScript(orgId, appsScriptUrl, action = 'push_all', projectId = null) {
+/**
+ * Incremental push: only bugs where sheet_pushed_at IS NULL are sent (append action).
+ * Returns { nothing: true } if there are no unpushed bugs.
+ * Returns { pushedIds: [...] } on success so the caller can mark bugs as pushed.
+ */
+async function pushToAppsScript(orgId, appsScriptUrl, projectId = null) {
   const projectQuery = projectId
     ? 'SELECT * FROM projects WHERE org_id=$1 AND id=$2 ORDER BY name ASC'
     : 'SELECT * FROM projects WHERE org_id=$1 ORDER BY name ASC';
@@ -193,13 +198,25 @@ async function pushToAppsScript(orgId, appsScriptUrl, action = 'push_all', proje
   const userMap = new Map(users.map(u => [String(u.id), u.name]));
 
   const sheets = [];
+  const allPushedIds = [];
+
   for (const project of projects) {
+    // Only bugs not yet pushed to the sheet
     const { rows: bugs } = await db.query(
-      'SELECT * FROM bugs WHERE org_id=$1 AND project_id=$2 ORDER BY created_at ASC',
+      'SELECT * FROM bugs WHERE org_id=$1 AND project_id=$2 AND sheet_pushed_at IS NULL ORDER BY created_at ASC',
       [orgId, project.id]
     );
+    if (bugs.length === 0) continue;
+
+    // S.No continues from the count of already-pushed bugs
+    const { rows: cr } = await db.query(
+      'SELECT COUNT(*) FROM bugs WHERE org_id=$1 AND project_id=$2 AND sheet_pushed_at IS NOT NULL',
+      [orgId, project.id]
+    );
+    const startNum = parseInt(cr[0].count, 10);
+
     const rows = bugs.map((bug, idx) => [
-      idx + 1,
+      startNum + idx + 1,
       bug.title || '',
       bug.status || '',
       bug.priority || '',
@@ -214,9 +231,13 @@ async function pushToAppsScript(orgId, appsScriptUrl, action = 'push_all', proje
       getMetaValue(bug.description, 'Sprint'),
     ]);
     sheets.push({ name: safeName(project.name), headers: SHEET_HEADERS, rows });
+    bugs.forEach(b => allPushedIds.push(b.id));
   }
 
-  return httpsPost(appsScriptUrl, { action, sheets });
+  if (sheets.length === 0) return { nothing: true };
+
+  const result = await httpsPost(appsScriptUrl, { action: 'append', sheets });
+  return { ...result, pushedIds: allPushedIds };
 }
 
 /**
