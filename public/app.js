@@ -669,8 +669,9 @@ function AuthPage({ onAuth }) {
                 ⚠ {error}
               </div>
             )}
-            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width:'100%', justifyContent:'center', padding:'11px 0', fontSize:14 }}>
-              {loading ? '⏳ Please wait…' : mode==='login' ? '🔑 Log In' : '🚀 Create Company Workspace'}
+            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width:'100%', justifyContent:'center', padding:'11px 0', fontSize:14, gap:8 }}>
+              {loading && <span className="btn-spinner"/>}
+              {loading ? (mode==='login' ? 'Signing in…' : 'Creating workspace…') : (mode==='login' ? '🔑 Sign In' : '🚀 Create Company Workspace')}
             </button>
           </form>
 
@@ -1277,9 +1278,194 @@ function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
   );
 }
 
+// ── MemberDashboard ───────────────────────────────────────────────────────────
+function MemberDashboard({ member, bugs, projects, users, onBack, toast, currentUser }) {
+  const [filterStatus,   setFilterStatus]   = useState('');
+  const [filterPriority, setFilterPriority] = useState('');
+  const [filterProject,  setFilterProject]  = useState('');
+  const [filterAssignedBy, setFilterAssignedBy] = useState('');
+  const [selectedBug, setSelectedBug] = useState(null);
+  const [localBugs, setLocalBugs] = useState(bugs);
+
+  // keep in sync if parent bugs list changes
+  useEffect(() => setLocalBugs(bugs), [bugs]);
+
+  const memberBugs = localBugs.filter(b => b.assigneeId === member.id);
+
+  // stats
+  const total      = memberBugs.length;
+  const done       = memberBugs.filter(b => b.status === 'Done').length;
+  const inProgress = memberBugs.filter(b => b.status === 'In Progress').length;
+  const inReview   = memberBugs.filter(b => b.status === 'In Review').length;
+  const todo       = memberBugs.filter(b => b.status === 'To Do').length;
+  const critical   = memberBugs.filter(b => b.priority === 'Critical').length;
+  const resolveRate = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  // unique assignedBy (reporter) options from this member's bugs
+  const assignedByOptions = [...new Map(
+    memberBugs
+      .filter(b => b.reporterId)
+      .map(b => {
+        const u = users.find(u => u.id === b.reporterId);
+        return [b.reporterId, u ? u.name : 'Unknown'];
+      })
+  ).entries()].map(([id, name]) => ({ id, name }));
+
+  // filtered list
+  const filtered = memberBugs.filter(b => {
+    if (filterStatus    && b.status   !== filterStatus)    return false;
+    if (filterPriority  && b.priority !== filterPriority)  return false;
+    if (filterProject   && String(b.projectId) !== String(filterProject)) return false;
+    if (filterAssignedBy && String(b.reporterId) !== String(filterAssignedBy)) return false;
+    return true;
+  });
+
+  const activeFilters = [filterStatus, filterPriority, filterProject, filterAssignedBy].filter(Boolean).length;
+  const clearFilters = () => { setFilterStatus(''); setFilterPriority(''); setFilterProject(''); setFilterAssignedBy(''); };
+
+  return (
+    <div className="member-dashboard">
+      {/* Back header */}
+      <div className="member-dashboard-header">
+        <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to Team</button>
+        <div className="member-dashboard-identity">
+          <div className="member-dashboard-avatar">
+            {member.avatar && member.avatar.startsWith('data:image/')
+              ? <img src={member.avatar} alt={member.name} style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>
+              : <span>{member.avatar || getInitials(member.name)}</span>}
+          </div>
+          <div>
+            <h2 style={{fontSize:20,fontWeight:700,margin:0}}>{member.name}</h2>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4}}>
+              <span style={{fontSize:12,color:'var(--muted)'}}>{member.email}</span>
+              <span style={{fontSize:11,fontWeight:600,color:'#fff',background:ROLE_COLORS[member.role]||'#6366f1',padding:'2px 8px',borderRadius:99}}>
+                {ROLE_LABELS[member.role]||member.role}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stat cards */}
+      <div className="member-stat-row">
+        {[
+          { label:'Total Assigned', value:total,      color:'var(--primary)' },
+          { label:'To Do',          value:todo,        color:'var(--muted)'   },
+          { label:'In Progress',    value:inProgress,  color:'var(--primary)' },
+          { label:'In Review',      value:inReview,    color:'var(--warning)' },
+          { label:'Resolved',       value:done,        color:'var(--success)' },
+          { label:'Critical',       value:critical,    color:'var(--danger)'  },
+          { label:'Resolve Rate',   value:resolveRate+'%', color:'var(--success)' },
+        ].map(s => (
+          <div key={s.label} className="member-stat-card">
+            <div style={{fontSize:22,fontWeight:700,color:s.color}}>{s.value}</div>
+            <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="member-filters">
+        <select className="filter-select" value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
+          <option value="">All Statuses</option>
+          {['To Do','In Progress','In Review','Done'].map(s=><option key={s}>{s}</option>)}
+        </select>
+        <select className="filter-select" value={filterPriority} onChange={e=>setFilterPriority(e.target.value)}>
+          <option value="">All Priorities</option>
+          {['Critical','High','Medium','Low'].map(p=><option key={p}>{p}</option>)}
+        </select>
+        <select className="filter-select" value={filterProject} onChange={e=>setFilterProject(e.target.value)}>
+          <option value="">All Projects</option>
+          {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select className="filter-select" value={filterAssignedBy} onChange={e=>setFilterAssignedBy(e.target.value)}>
+          <option value="">Assigned By (all)</option>
+          {assignedByOptions.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+        {activeFilters > 0 && (
+          <button className="btn btn-ghost btn-sm" onClick={clearFilters}>✕ Clear ({activeFilters})</button>
+        )}
+        <span style={{marginLeft:'auto',fontSize:12,color:'var(--muted)',alignSelf:'center'}}>
+          {filtered.length} issue{filtered.length!==1?'s':''}
+        </span>
+      </div>
+
+      {/* Issues table */}
+      <div className="member-issue-table-wrap">
+        {filtered.length === 0 ? (
+          <div style={{textAlign:'center',padding:'40px 0',color:'var(--muted)',fontSize:14}}>No issues match the current filters.</div>
+        ) : (
+          <table className="bug-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Title</th>
+                <th>Project</th>
+                <th>Status</th>
+                <th>Priority</th>
+                <th>Type</th>
+                <th>Assigned By</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(b => {
+                const proj = projects.find(p => p.id === b.projectId);
+                const reporter = b.reporterId ? users.find(u => u.id === b.reporterId) : null;
+                return (
+                  <tr key={b.id} style={{cursor:'pointer'}} onClick={()=>setSelectedBug(b.id)}>
+                    <td><span style={{fontFamily:'monospace',fontSize:12,color:'var(--muted)'}}>{b.key||`#${b.id}`}</span></td>
+                    <td style={{maxWidth:280}}>
+                      <div style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:500}}>{b.title}</div>
+                    </td>
+                    <td>
+                      {proj && (
+                        <span style={{display:'flex',alignItems:'center',gap:5}}>
+                          <span style={{width:8,height:8,borderRadius:'50%',background:proj.color,flexShrink:0}}/>
+                          <span style={{fontSize:12}}>{proj.name}</span>
+                        </span>
+                      )}
+                    </td>
+                    <td><StatusBadge s={b.status}/></td>
+                    <td><PriorityBadge p={b.priority}/></td>
+                    <td><TypeBadge t={b.type}/></td>
+                    <td>
+                      {reporter ? (
+                        <span style={{display:'flex',alignItems:'center',gap:6}}>
+                          <Avatar user={reporter} size="xs"/>
+                          <span style={{fontSize:12}}>{reporter.name}</span>
+                        </span>
+                      ) : <span style={{color:'var(--muted)',fontSize:12}}>—</span>}
+                    </td>
+                    <td style={{fontSize:12,color:'var(--muted)',whiteSpace:'nowrap'}}>{formatDate(b.createdAt)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {selectedBug && (
+        <BugDetail
+          bugId={selectedBug}
+          projects={projects}
+          users={users}
+          onClose={()=>setSelectedBug(null)}
+          onUpdate={updated => setLocalBugs(bs => bs.map(b => b.id === updated.id ? updated : b))}
+          onDelete={id => { setLocalBugs(bs => bs.filter(b => b.id !== id)); setSelectedBug(null); }}
+          toast={toast}
+          currentUser={currentUser}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── TeamPage (multi-tenant, role-aware) ───────────────────────────────────────
-function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpdated }) {
+function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpdated, projects }) {
   const isAdmin = currentUser?.role === 'admin';
+  const [selectedMember, setSelectedMember] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name:'', email:'', role:'developer', color:'#6366f1' }); // avatarDataUrl will be added to payload directly
   const [avatarFile, setAvatarFile] = useState(null);
@@ -1351,6 +1537,18 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
 
   return (
     <div>
+      {selectedMember && (
+        <MemberDashboard
+          member={selectedMember}
+          bugs={bugs}
+          projects={projects||[]}
+          users={users}
+          onBack={()=>setSelectedMember(null)}
+          toast={toast}
+          currentUser={currentUser}
+        />
+      )}
+      {!selectedMember && <>
       <div className="page-header">
         <div>
           <h1>Team Members</h1>
@@ -1365,7 +1563,10 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
           const done = assigned.filter(b => b.status === 'Done').length;
           const isSelf = u.id === currentUser?.id;
           return (
-            <div key={u.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,position:'relative'}}>
+            <div key={u.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,position:'relative',cursor:'pointer',transition:'border-color .15s,box-shadow .15s'}}
+              onClick={e=>{ if(e.target.closest('select,button,input,label')) return; setSelectedMember(u); }}
+              onMouseEnter={e=>{ e.currentTarget.style.borderColor='var(--primary)'; e.currentTarget.style.boxShadow='0 0 0 1px var(--primary)'; }}
+              onMouseLeave={e=>{ e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.boxShadow='none'; }}>
               {isSelf && <div style={{position:'absolute',top:12,right:12,fontSize:10,background:'var(--primary)',color:'#fff',padding:'2px 7px',borderRadius:99,fontWeight:600}}>YOU</div>}
               <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:14}}>
                 <Avatar user={u} />
@@ -1512,6 +1713,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
           <div className="modal-footer"><button className="btn btn-primary" onClick={()=>setResetResult(null)}>Done</button></div>
         </Modal>
       )}
+      </>}
     </div>
   );
 }
@@ -2286,7 +2488,7 @@ function App() {
           {view==='board'     && <KanbanBoard projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
-          {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
+          {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} projects={projects} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
           {view==='roles'     && <RolesPage users={users} currentUser={authUser} toast={toast}/>}
           {view==='settings'  && <SettingsPage org={authOrg} setOrg={setAuthOrg} currentUser={authUser} toast={toast} users={users}/>}
         </div>
