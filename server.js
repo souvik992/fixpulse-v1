@@ -12,6 +12,7 @@ const { randomUUID } = require('crypto');
 const { PERMISSIONS } = require('./rbac/permissions');
 const { checkPermission, assignSystemRole, getUserPermissions, LEGACY_TO_RBAC } = require('./rbac/middleware');
 const { startGoogleSheetSync, getGoogleSheetSyncStatus, triggerGoogleSheetSync } = require('./services/googleSheetSync');
+const { addProjectTabToSheet, exportOrgToXlsxBuffer, pushToAppsScript, pushNewTabToAppsScript } = require('./services/sheetExport');
 
 // ── In-memory presence store ──────────────────────────────────────────────────
 // Map<orgId, Map<userId, { lastSeen: Date, user: { id, name, avatar, color } }>>
@@ -121,6 +122,7 @@ function buildOrgPayload(orgRow) {
     dataSourceSyncEnabled: Boolean(org.dataSourceSyncEnabled),
     dataSourceLastSyncedAt: org.dataSourceLastSyncedAt || null,
     dataSourceLastError: org.dataSourceLastError || null,
+    appsScriptUrl: org.appsScriptUrl || '',
   };
 }
 
@@ -622,6 +624,7 @@ app.put('/api/org', auth, async (req, res) => {
       return res.status(404).json({ error: 'Organization not found' });
     }
     const sourceConfig = normalizeOrgDataSource(req.body, existing);
+    const appsScriptUrl = String(req.body.appsScriptUrl || '').trim();
     const { rows } = await db.query(
       `UPDATE organizations
        SET name=$1,
@@ -633,6 +636,7 @@ app.put('/api/org', auth, async (req, res) => {
            data_source_file_name=$8::text,
            data_source_file_data=$9::text,
            data_source_sync_enabled=$10,
+           apps_script_url=$11::text,
            data_source_last_error=CASE
              WHEN $5::text IS NULL THEN NULL
              ELSE data_source_last_error
@@ -650,6 +654,7 @@ app.put('/api/org', auth, async (req, res) => {
         sourceConfig.dataSourceFileName,
         sourceConfig.dataSourceFileData,
         sourceConfig.dataSourceSyncEnabled,
+        appsScriptUrl || null,
       ]
     );
     res.json(buildOrgPayload(rows[0]));
@@ -890,6 +895,52 @@ app.put('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), asy
   }
 });
 
+app.post('/api/members/:id/reassign', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: "You can't reassign issues from yourself with this action" });
+    }
+
+    const { targetUserId } = req.body || {};
+    if (!targetUserId) {
+      return res.status(400).json({ error: 'Target member is required' });
+    }
+    if (targetUserId === req.params.id) {
+      return res.status(400).json({ error: 'Choose a different member to reassign issues to' });
+    }
+
+    const { rows: sourceRows } = await db.query(
+      'SELECT id, name FROM users WHERE id=$1 AND org_id=$2',
+      [req.params.id, req.user.orgId]
+    );
+    if (!sourceRows.length) {
+      return res.status(404).json({ error: 'Source member not found' });
+    }
+
+    const { rows: targetRows } = await db.query(
+      'SELECT id, name FROM users WHERE id=$1 AND org_id=$2',
+      [targetUserId, req.user.orgId]
+    );
+    if (!targetRows.length) {
+      return res.status(404).json({ error: 'Target member not found' });
+    }
+
+    const result = await db.query(
+      'UPDATE bugs SET assignee_id=$1, updated_at=NOW() WHERE org_id=$2 AND assignee_id=$3',
+      [targetUserId, req.user.orgId, req.params.id]
+    );
+
+    res.json({
+      success: true,
+      movedCount: result.rowCount || 0,
+      sourceUser: camel(sourceRows[0]),
+      targetUser: camel(targetRows[0]),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.delete('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
     if (req.params.id === req.user.id) {
@@ -944,6 +995,12 @@ app.post('/api/projects', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), asy
       'INSERT INTO project_sequences (project_id,next_num) VALUES ($1,1) ON CONFLICT DO NOTHING',
       [project.id]
     );
+
+    // Add tab to linked XLSX (if any) and push to Apps Script (if configured)
+    addProjectTabToSheet(req.user.orgId, name).catch(() => {});
+    db.query('SELECT apps_script_url FROM organizations WHERE id=$1', [req.user.orgId])
+      .then(({ rows: r }) => { if (r[0]?.apps_script_url) pushNewTabToAppsScript(r[0].apps_script_url, name).catch(() => {}); })
+      .catch(() => {});
 
     res.status(201).json(project);
   } catch (error) {
@@ -1572,6 +1629,34 @@ app.post('/api/sheet-sync/run', auth, async (req, res) => {
   }
 });
 
+app.post('/api/sheet-push', auth, async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT apps_script_url FROM organizations WHERE id=$1', [req.user.orgId]);
+    const url = rows[0]?.apps_script_url;
+    if (!url) return res.status(400).json({ error: 'No Apps Script URL configured in Settings.' });
+    const projectId = req.body?.projectId || null;
+    const result = await pushToAppsScript(req.user.orgId, url, 'push_all', projectId);
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/sheet-export', auth, async (req, res) => {
+  try {
+    const projectId = req.query.projectId || null;
+    const buffer = await exportOrgToXlsxBuffer(req.user.orgId, projectId);
+    const { rows } = await db.query('SELECT name FROM organizations WHERE id=$1', [req.user.orgId]);
+    const orgName = (rows[0]?.name || 'export').replace(/[^a-zA-Z0-9]/g, '_');
+    const suffix = projectId ? `_project` : `_all_projects`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${orgName}${suffix}_issues.xlsx"`);
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/', (req, res) => {
   if (hasTokenMarkerCookie(req)) {
     return res.sendFile(path.join(__dirname, 'public', 'login.html'));
@@ -1588,6 +1673,7 @@ app.get('*', (req, res) => {
 (async () => {
   try {
     await db.connect();
+    await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS apps_script_url TEXT`);
     app.listen(PORT, () => {
       console.log(`\nBugTracker      ->  http://localhost:${PORT}`);
       console.log('Storage         ->  PostgreSQL');

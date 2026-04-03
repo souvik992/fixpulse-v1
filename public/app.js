@@ -375,7 +375,7 @@ function useSheetSyncStatus() {
   return { syncStatus, refreshSyncStatus: loadStatus };
 }
 
-function SyncTimestamp({ toast }) {
+function SyncTimestamp({ toast, onSyncComplete }) {
   const { syncStatus, refreshSyncStatus } = useSheetSyncStatus();
   const [syncing, setSyncing] = useState(false);
   const syncDisplay = syncStatus?.lastSuccessAt
@@ -398,7 +398,14 @@ function SyncTimestamp({ toast }) {
         toast?.(result.error, 'error');
       } else {
         toast?.(result.started ? 'Manual data sync started' : 'Data sync is already running', 'info');
-        setTimeout(() => { refreshSyncStatus(); }, 1500);
+        const pollUntilDone = () => {
+          api.get('/api/sheet-sync/status').then(status => {
+            refreshSyncStatus();
+            if (status?.running) { setTimeout(pollUntilDone, 2000); }
+            else { onSyncComplete?.(); }
+          });
+        };
+        setTimeout(pollUntilDone, 1500);
       }
     } finally {
       setSyncing(false);
@@ -475,6 +482,7 @@ function IssueTable({ bugs, users, projects, currentProject, onSelectBug, emptyT
 
 function ExportReportFiltersModal({ visible, onClose, currentProject, projects, users, exportFilters, setExportFilter, onReset, onExport }) {
   if (!visible) return null;
+  const hasFilters = [exportFilters.startDate, exportFilters.endDate, exportFilters.assigneeId, exportFilters.priority, exportFilters.status, exportFilters.type, ...(!currentProject ? [exportFilters.projectId] : [])].some(Boolean);
 
   return (
     <Modal onClose={onClose}>
@@ -502,7 +510,7 @@ function ExportReportFiltersModal({ visible, onClose, currentProject, projects, 
           <div className="form-group"><label className="form-label">Issue Type</label><select className="form-select" value={exportFilters.type} onChange={e => setExportFilter('type', e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
         </div>
       </div>
-      <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={onReset}>Reset</button><button type="button" className="btn btn-primary" onClick={onExport}>Export</button></div>
+      <div className="modal-footer">{hasFilters && <button type="button" className="btn btn-ghost" onClick={onReset}>Reset</button>}<button type="button" className="btn btn-primary" onClick={onExport}>{hasFilters ? 'Export' : 'Export without filter'}</button></div>
     </Modal>
   );
 }
@@ -1197,7 +1205,7 @@ function BugListLegacy({ projects, users, currentProject, toast, currentUser }) 
   );
 }
 
-function Dashboard({ projects, users, currentProject, onSelectProject, currentUser, toast }) {
+function Dashboard({ projects, users, currentProject, onSelectProject, currentUser, toast, onSyncComplete }) {
   const [stats, setStats] = useState(null);
   const [allBugs, setAllBugs] = useState([]);
   const [selectedBug, setSelectedBug] = useState(null);
@@ -1295,7 +1303,7 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
           <div className="table-card" style={{padding:20}}>
             <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:16}}>
               <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',margin:0}}>Issues</h3>
-              <SyncTimestamp toast={toast} />
+              <SyncTimestamp toast={toast} onSyncComplete={onSyncComplete} />
             </div>
             {allBugs.length === 0
               ? <div style={{color:'var(--muted)',fontSize:13,padding:'16px 0',textAlign:'center'}}>No issues found.</div>
@@ -1322,7 +1330,7 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
   );
 }
 
-function BugList({ projects, users, currentProject, toast, currentUser }) {
+function BugList({ projects, users, currentProject, toast, currentUser, onSyncComplete }) {
   const [bugs, setBugs] = useState([]);
   const [filters, setFilters] = useState({ status:'', priority:'', type:'', assigneeId:'', search:'' });
   const [showCreate, setShowCreate] = useState(false);
@@ -1363,7 +1371,7 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
         <div className="table-card">
           <div style={{display:'flex',alignItems:'flex-start',gap:12,padding:'16px 16px 0'}}>
             <div style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Recent Issues</div>
-            <SyncTimestamp toast={toast} />
+            <SyncTimestamp toast={toast} onSyncComplete={onSyncComplete} />
           </div>
           <IssueTable bugs={paginatedBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
           {totalPages > 1 && (
@@ -1633,10 +1641,12 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
 }
 
 // ── TeamPage (multi-tenant, role-aware) ───────────────────────────────────────
-function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpdated, projects }) {
+function TeamPage({ users, setUsers, bugs, setBugs, toast, currentUser, onCurrentUserUpdated, projects }) {
   const isAdmin = currentUser?.role === 'admin';
   const [selectedMember, setSelectedMember] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [reassignTarget, setReassignTarget] = useState(null);
+  const [reassignToId, setReassignToId] = useState('');
   const [form, setForm] = useState({ name:'', email:'', role:'developer', color:'#6366f1' }); // avatarDataUrl will be added to payload directly
   const [avatarFile, setAvatarFile] = useState(null);
   const [newCredentials, setNewCredentials] = useState(null); // { name, email, tempPassword }
@@ -1689,6 +1699,28 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
     toast('Member removed', 'info');
   };
 
+  const reassignMemberIssues = async () => {
+    if (!reassignTarget || !reassignToId) {
+      toast('Select a member to move the issues to', 'error');
+      return;
+    }
+    const res = await api.post(`/api/members/${reassignTarget.id}/reassign`, { targetUserId: reassignToId });
+    if (res.error) {
+      toast(res.error, 'error');
+      return;
+    }
+    if (setBugs) {
+      setBugs(current => current.map(bug =>
+        bug.assigneeId === reassignTarget.id
+          ? { ...bug, assigneeId: reassignToId, updatedAt: new Date().toISOString() }
+          : bug
+      ));
+    }
+    setReassignTarget(null);
+    setReassignToId('');
+    toast(`${res.movedCount || 0} issue${res.movedCount === 1 ? '' : 's'} moved successfully`, 'success');
+  };
+
   const resetPassword = async id => {
     const member = users.find(u => u.id === id);
     const res = await api.post(`/api/members/${id}/reset-password`, {});
@@ -1712,6 +1744,9 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
       const q = search.toLowerCase();
       return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (ROLE_LABELS[u.role]||u.role).toLowerCase().includes(q);
     });
+  const reassignOptions = users
+    .filter(u => u.id !== reassignTarget?.id)
+    .map(u => ({ value: u.id, label: `${u.name} (${ROLE_LABELS[u.role] || u.role})` }));
 
   return (
     <div>
@@ -1800,6 +1835,7 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
                     <option value="tester">QA</option>
                     <option value="viewer">Viewer</option>
                   </select>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>{ setReassignTarget(u); setReassignToId(''); }}>Re-Assign</button>
                   <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>setResetTarget(u)}>🔑 Reset PW</button>
                   <button className="btn btn-danger btn-sm" style={{fontSize:11}} onClick={()=>removeMember(u.id)}>Remove</button>
                 </div>
@@ -1853,6 +1889,26 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
             </div>
             <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={()=>setShowAdd(false)}>Cancel</button><button type="submit" className="btn btn-primary">Add Member</button></div>
           </form>
+        </Modal>
+      )}
+
+      {reassignTarget && (
+        <Modal onClose={() => { setReassignTarget(null); setReassignToId(''); }}>
+          <div className="modal-header"><h2 className="modal-title">Re-Assign Issues</h2><button className="btn-icon" onClick={() => { setReassignTarget(null); setReassignToId(''); }}>✕</button></div>
+          <div className="modal-body">
+            <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>Move all issues currently assigned to <strong>{reassignTarget.name}</strong> to another member in this organization.</p>
+            <div className="form-group">
+              <label className="form-label">Move Assigned Issues To</label>
+              <SearchableSelect value={reassignToId} onChange={setReassignToId} options={reassignOptions} placeholder="Select member" width="100%" />
+            </div>
+            <div style={{background:'var(--surface2)',borderRadius:8,padding:'10px 14px',fontSize:12,color:'var(--muted)'}}>
+              Only assigned issues will move. Reporter history and member profile details stay unchanged.
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button className="btn btn-ghost" onClick={() => { setReassignTarget(null); setReassignToId(''); }}>Cancel</button>
+            <button className="btn btn-primary" onClick={reassignMemberIssues} disabled={!reassignToId}>Re-Assign Issues</button>
+          </div>
         </Modal>
       )}
 
@@ -1931,6 +1987,34 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
   const [saving, setSaving] = useState(false);
   const [planSaving, setPlanSaving] = useState('');
   const [syncingSource, setSyncingSource] = useState(false);
+  const [exportingSheet, setExportingSheet] = useState(false);
+
+  const addToSheet = async () => {
+    setExportingSheet(true);
+    try {
+      if (org?.appsScriptUrl) {
+        const res = await api.post('/api/sheet-push', {});
+        if (res?.error) { toast(res.error, 'error'); return; }
+        toast('Issues pushed to Google Sheet', 'success');
+      } else {
+        const token = Token.get();
+        const res = await fetch('/api/sheet-export', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) { const j = await res.json(); toast(j.error || 'Export failed', 'error'); return; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const cd = res.headers.get('Content-Disposition') || '';
+        const match = cd.match(/filename="([^"]+)"/);
+        a.download = match ? match[1] : 'issues.xlsx';
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('Sheet downloaded', 'success');
+      }
+    } finally {
+      setExportingSheet(false);
+    }
+  };
   const setF = (k,v) => setForm(f=>({...f,[k]:v}));
 
   useEffect(() => {
@@ -1940,8 +2024,9 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
       dataSourceType: org?.dataSourceType || '',
       dataSourceUrl: org?.dataSourceUrl || '',
       dataSourceSyncEnabled: Boolean(org?.dataSourceSyncEnabled),
+      appsScriptUrl: org?.appsScriptUrl || '',
     });
-  }, [org?.name, org?.color, org?.dataSourceType, org?.dataSourceUrl, org?.dataSourceSyncEnabled]);
+  }, [org?.name, org?.color, org?.dataSourceType, org?.dataSourceUrl, org?.dataSourceSyncEnabled, org?.appsScriptUrl]);
 
   const save = async e => {
     e.preventDefault();
@@ -2102,14 +2187,25 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
                     Link a Google Sheet or upload an Excel/CSV file for this organisation. Each tab becomes a project and each matching row becomes an issue, just like the existing Twinleaves import flow.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={runSourceSync}
-                  disabled={syncingSource || !org?.dataSourceType}
-                >
-                  {syncingSource ? 'Syncing…' : 'Sync Now'}
-                </button>
+                <div style={{display:'flex',gap:8}}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={addToSheet}
+                    disabled={exportingSheet}
+                    title="Download all issues as a multi-tab XLSX file"
+                  >
+                    {exportingSheet ? 'Exporting…' : 'Add to Sheet'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={runSourceSync}
+                    disabled={syncingSource || !org?.dataSourceType}
+                  >
+                    {syncingSource ? 'Syncing…' : 'Sync Now'}
+                  </button>
+                </div>
               </div>
 
               {org?.dataSourceType && (
@@ -2176,6 +2272,41 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
                   Keep this source linked for automatic sync
                 </label>
               )}
+              <div style={{marginTop:24,paddingTop:20,borderTop:'1px solid var(--border)'}}>
+                <h3 style={{fontSize:14,fontWeight:600,marginBottom:4}}>Google Sheet Write-back (Apps Script)</h3>
+                <p style={{fontSize:13,color:'var(--muted)',marginBottom:12,lineHeight:1.6}}>
+                  Paste your Apps Script Web App URL to enable "Add to Sheet" to push issues directly into Google Sheets.
+                  <br/>
+                  <strong style={{color:'var(--text)'}}>Setup:</strong> In your Google Sheet → Extensions → Apps Script → paste the script below → Deploy → Web app → Execute as: Me, Access: Anyone → Copy the URL.
+                </p>
+                <pre style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:6,padding:'10px 14px',fontSize:11,overflowX:'auto',marginBottom:12,lineHeight:1.7}}>{`function doPost(e) {
+  try {
+    const p = JSON.parse(e.postData.contents);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    for (const t of p.sheets) {
+      let sh = ss.getSheetByName(t.name) || ss.insertSheet(t.name);
+      sh.clearContents();
+      const rows = t.rows && t.rows.length ? [t.headers, ...t.rows] : [t.headers];
+      sh.getRange(1,1,rows.length,t.headers.length).setValues(rows);
+      sh.getRange(1,1,1,t.headers.length).setFontWeight('bold').setBackground('#4472C4').setFontColor('#ffffff');
+      sh.setFrozenRows(1);
+    }
+    return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({ok:false,error:err.message})).setMimeType(ContentService.MimeType.JSON);
+  }
+}`}</pre>
+                <div className="form-group">
+                  <label className="form-label">Apps Script Web App URL</label>
+                  <input
+                    className="form-input"
+                    value={form.appsScriptUrl}
+                    onChange={e=>setF('appsScriptUrl', e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                  />
+                  {form.appsScriptUrl && <div style={{fontSize:12,color:'var(--accent)',marginTop:6}}>✓ "Add to Sheet" will push directly to Google Sheets</div>}
+                </div>
+              </div>
             </div>
             <button type="submit" className="btn btn-primary" disabled={saving} style={{marginTop:8}}>{saving?'Saving…':'Save Changes'}</button>
           </form>
@@ -2570,6 +2701,10 @@ function App() {
 
   const currentProject = projects.find(p => p.id === currentProjectId) || null;
   const visibleProjects = projects.filter(project => project.name.toLowerCase().includes(projectSearch.toLowerCase()));
+  const reloadData = () => {
+    Promise.all([api.get('/api/projects'), api.get('/api/members')])
+      .then(([p, u]) => { setProjects(p); setUsers(u); });
+  };
   const handleProjectCreated = project => {
     setCurrentProjectId(project.id);
     setView('projects');
@@ -2711,11 +2846,11 @@ function App() {
         </div>
 
         <div className="content">
-          {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onSelectProject={handleDashboardProjectSelect} currentUser={authUser} toast={toast}/>}
+          {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onSelectProject={handleDashboardProjectSelect} currentUser={authUser} toast={toast} onSyncComplete={reloadData}/>}
           {view==='board'     && <KanbanBoard projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
-          {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
+          {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser} onSyncComplete={reloadData}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
-          {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} projects={projects} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
+          {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} setBugs={setAllBugs} projects={projects} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
           {view==='roles'     && <RolesPage users={users} currentUser={authUser} toast={toast}/>}
           {view==='settings'  && <SettingsPage org={authOrg} setOrg={setAuthOrg} currentUser={authUser} toast={toast} users={users}/>}
         </div>
