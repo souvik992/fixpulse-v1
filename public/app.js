@@ -242,6 +242,75 @@ const ensureRazorpayLoaded = () => new Promise((resolve, reject) => {
   document.body.appendChild(script);
 });
 
+function SearchableSelect({ value, onChange, options, placeholder, width=180 }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const rootRef = useRef(null);
+  const selected = options.find(option => String(option.value) === String(value));
+  const filteredOptions = options.filter(option => option.label.toLowerCase().includes(query.toLowerCase()));
+
+  useEffect(() => {
+    if (!open) setQuery('');
+  }, [open]);
+
+  useEffect(() => {
+    const onDocumentClick = event => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocumentClick);
+    return () => document.removeEventListener('mousedown', onDocumentClick);
+  }, []);
+
+  return (
+    <div ref={rootRef} style={{position:'relative', minWidth:width}}>
+      <button
+        type="button"
+        className="filter-select"
+        onClick={() => setOpen(v => !v)}
+        style={{width:'100%', textAlign:'left', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10}}
+      >
+        <span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{selected?.label || placeholder}</span>
+        <span style={{fontSize:10, color:'var(--muted)'}}>▼</span>
+      </button>
+      {open && (
+        <div style={{position:'absolute', top:'calc(100% + 8px)', left:0, width:'100%', minWidth:220, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'var(--shadow)', zIndex:60, padding:10}}>
+          <input
+            className="form-input"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder={`Search ${placeholder.toLowerCase()}...`}
+            autoFocus
+            style={{marginBottom:8}}
+          />
+          <div style={{maxHeight:220, overflowY:'auto', display:'grid', gap:4}}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => { onChange(''); setOpen(false); }}
+              style={{justifyContent:'flex-start'}}
+            >
+              {placeholder}
+            </button>
+            {filteredOptions.length === 0 ? (
+              <div style={{padding:'8px 10px', fontSize:12, color:'var(--muted)'}}>No matching options</div>
+            ) : filteredOptions.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => { onChange(option.value); setOpen(false); }}
+                style={{justifyContent:'flex-start', background:String(option.value) === String(value) ? 'var(--surface2)' : 'transparent'}}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Toast ──────────────────────────────────────────────────────────────────────
 function useSheetSyncStatus() {
   const [syncStatus, setSyncStatus] = useState(null);
@@ -1322,6 +1391,12 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
 
   const activeFilters = [filterStatus, filterPriority, filterProject, filterAssignedBy].filter(Boolean).length;
   const clearFilters = () => { setFilterStatus(''); setFilterPriority(''); setFilterProject(''); setFilterAssignedBy(''); };
+  const statusOptions = ['To Do','In Progress','In Review','Done'].map(value => ({ value, label: value }));
+  const priorityOptions = ['Critical','High','Medium','Low'].map(value => ({ value, label: value }));
+  const projectOptions = projects
+    .filter(project => memberBugs.some(b => b.projectId === project.id))
+    .map(project => ({ value: project.id, label: project.name }));
+  const assignedBySearchOptions = assignedByOptions.map(option => ({ value: option.id, label: option.name }));
 
   return (
     <div className="member-dashboard">
@@ -1366,22 +1441,10 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
 
       {/* Filters */}
       <div className="member-filters">
-        <select className="filter-select" value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
-          <option value="">All Statuses</option>
-          {['To Do','In Progress','In Review','Done'].map(s=><option key={s}>{s}</option>)}
-        </select>
-        <select className="filter-select" value={filterPriority} onChange={e=>setFilterPriority(e.target.value)}>
-          <option value="">All Priorities</option>
-          {['Critical','High','Medium','Low'].map(p=><option key={p}>{p}</option>)}
-        </select>
-        <select className="filter-select" value={filterProject} onChange={e=>setFilterProject(e.target.value)}>
-          <option value="">All Projects</option>
-          {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <select className="filter-select" value={filterAssignedBy} onChange={e=>setFilterAssignedBy(e.target.value)}>
-          <option value="">Assigned By (all)</option>
-          {assignedByOptions.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
+        <SearchableSelect value={filterStatus} onChange={setFilterStatus} options={statusOptions} placeholder="All Statuses" width={150} />
+        <SearchableSelect value={filterPriority} onChange={setFilterPriority} options={priorityOptions} placeholder="All Priorities" width={160} />
+        <SearchableSelect value={filterProject} onChange={setFilterProject} options={projectOptions} placeholder="All Projects" width={200} />
+        <SearchableSelect value={filterAssignedBy} onChange={setFilterAssignedBy} options={assignedBySearchOptions} placeholder="Assigned By (all)" width={180} />
         {activeFilters > 0 && (
           <button className="btn btn-ghost btn-sm" onClick={clearFilters}>✕ Clear ({activeFilters})</button>
         )}
