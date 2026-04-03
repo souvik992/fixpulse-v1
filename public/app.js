@@ -204,6 +204,51 @@ const PLAN_OPTIONS = [
   { code:'enterprise', name:'Enterprise', price:'$108.30 / mo', userLimit:null, blurb:'For larger rollouts, unlimited seats, and organizations that need unrestricted team expansion.', cta:'Pay and Upgrade', featured:false },
 ];
 const ALL_PERMISSIONS = ['CREATE_ISSUE','EDIT_ISSUE','DELETE_ISSUE','ASSIGN_ISSUE','CHANGE_STATUS','COMMENT','VIEW_ISSUE','VIEW_REPORTS','MANAGE_PROJECT','MANAGE_USERS','CONFIGURE_WORKFLOW'];
+const APPS_SCRIPT_SNIPPET = `function doPost(e) {
+  try {
+    const p = JSON.parse(e.postData.contents);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    for (const t of p.sheets) {
+      let sh = ss.getSheetByName(t.name) || ss.insertSheet(t.name);
+      const headers = t.headers || [];
+      const rows = t.rows || [];
+
+      if (p.action === 'add_tab') {
+        if (sh.getLastRow() === 0 && headers.length) {
+          sh.getRange(1,1,1,headers.length).setValues([headers]);
+        }
+      } else if (p.action === 'append') {
+        if (sh.getLastRow() === 0 && headers.length) {
+          sh.getRange(1,1,1,headers.length).setValues([headers]);
+        }
+        if (rows.length) {
+          sh.getRange(sh.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+        }
+      } else {
+        const allRows = rows.length ? [headers, ...rows] : [headers];
+        sh.clearContents();
+        sh.getRange(1,1,allRows.length,headers.length).setValues(allRows);
+      }
+
+      if (headers.length) {
+        sh.getRange(1,1,1,headers.length)
+          .setFontWeight('bold')
+          .setFontFamily('Arial')
+          .setFontSize(10)
+          .setBackground('#F6E3CC')
+          .setFontColor('#000000')
+          .setHorizontalAlignment('center')
+          .setVerticalAlignment('middle')
+          .setWrap(true)
+          .setBorder(true, true, true, true, true, true, '#D8C0A3', SpreadsheetApp.BorderStyle.SOLID);
+        sh.setFrozenRows(1);
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({ok:false,error:err.message})).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
 
 const readFilesAsAttachments = files => Promise.all(
   [...files]
@@ -1989,6 +2034,7 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
   const [planSaving, setPlanSaving] = useState('');
   const [syncingSource, setSyncingSource] = useState(false);
   const [exportingSheet, setExportingSheet] = useState(false);
+  const [scriptCopied, setScriptCopied] = useState(false);
 
   const addToSheet = async () => {
     setExportingSheet(true);
@@ -2122,6 +2168,17 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
     if (res?.error) toast(res.error, 'error');
     else toast(res.started ? 'Data sync started for this organization' : 'A data sync is already running', 'info');
     setSyncingSource(false);
+  };
+
+  const copyAppsScriptSnippet = async () => {
+    try {
+      await navigator.clipboard.writeText(APPS_SCRIPT_SNIPPET);
+      setScriptCopied(true);
+      setTimeout(() => setScriptCopied(false), 2000);
+      toast('Apps Script copied', 'success');
+    } catch {
+      toast('Unable to copy script', 'error');
+    }
   };
 
   return (
@@ -2275,57 +2332,18 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
                 </label>
               )}
               <div style={{marginTop:24,paddingTop:20,borderTop:'1px solid var(--border)'}}>
-                <h3 style={{fontSize:14,fontWeight:600,marginBottom:4}}>Google Sheet Write-back (Apps Script)</h3>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:4,flexWrap:'wrap'}}>
+                  <h3 style={{fontSize:14,fontWeight:600,margin:0}}>Google Sheet Write-back (Apps Script)</h3>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={copyAppsScriptSnippet}>
+                    {scriptCopied ? '✓ Copied' : '📋 Copy Script'}
+                  </button>
+                </div>
                 <p style={{fontSize:13,color:'var(--muted)',marginBottom:12,lineHeight:1.6}}>
                   Paste your Apps Script Web App URL to enable "Add to Sheet" to push issues directly into Google Sheets.
                   <br/>
                   <strong style={{color:'var(--text)'}}>Setup:</strong> In your Google Sheet → Extensions → Apps Script → paste the script below → Deploy → Web app → Execute as: Me, Access: Anyone → Copy the URL.
                 </p>
-                <pre style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:6,padding:'10px 14px',fontSize:11,overflowX:'auto',marginBottom:12,lineHeight:1.7}}>{`function doPost(e) {
-  try {
-    const p = JSON.parse(e.postData.contents);
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    for (const t of p.sheets) {
-      let sh = ss.getSheetByName(t.name) || ss.insertSheet(t.name);
-      const headers = t.headers || [];
-      const rows = t.rows || [];
-
-      if (p.action === 'add_tab') {
-        if (sh.getLastRow() === 0 && headers.length) {
-          sh.getRange(1,1,1,headers.length).setValues([headers]);
-        }
-      } else if (p.action === 'append') {
-        if (sh.getLastRow() === 0 && headers.length) {
-          sh.getRange(1,1,1,headers.length).setValues([headers]);
-        }
-        if (rows.length) {
-          sh.getRange(sh.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
-        }
-      } else {
-        const allRows = rows.length ? [headers, ...rows] : [headers];
-        sh.clearContents();
-        sh.getRange(1,1,allRows.length,headers.length).setValues(allRows);
-      }
-
-      if (headers.length) {
-        sh.getRange(1,1,1,headers.length)
-          .setFontWeight('bold')
-          .setFontFamily('Arial')
-          .setFontSize(10)
-          .setBackground('#F6E3CC')
-          .setFontColor('#000000')
-          .setHorizontalAlignment('center')
-          .setVerticalAlignment('middle')
-          .setWrap(true)
-          .setBorder(true, true, true, true, true, true, '#D8C0A3', SpreadsheetApp.BorderStyle.SOLID);
-        sh.setFrozenRows(1);
-      }
-    }
-    return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
-  } catch(err) {
-    return ContentService.createTextOutput(JSON.stringify({ok:false,error:err.message})).setMimeType(ContentService.MimeType.JSON);
-  }
-}`}</pre>
+                <pre style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:6,padding:'10px 14px',fontSize:11,overflow:'auto',marginBottom:12,lineHeight:1.7,maxHeight:220,whiteSpace:'pre'}}>{APPS_SCRIPT_SNIPPET}</pre>
                 <div className="form-group">
                   <label className="form-label">Apps Script Web App URL</label>
                   <input

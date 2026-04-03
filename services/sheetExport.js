@@ -178,10 +178,9 @@ function httpsPost(url, data, redirectsLeft = 5) {
 /**
  * Build the sheet payload and post it to the org's configured Apps Script URL.
  *
- * Important:
- * We send full tab contents instead of only newly-created issues.
- * That keeps write-back compatible with older Apps Script deployments
- * that clear and rewrite the sheet on every request.
+ * Incremental push:
+ * only bugs where sheet_pushed_at IS NULL are sent so newly-added issues
+ * get appended below the last existing issue row in each project tab.
  */
 async function pushToAppsScript(orgId, appsScriptUrl, projectId = null) {
   const projectQuery = projectId
@@ -201,13 +200,19 @@ async function pushToAppsScript(orgId, appsScriptUrl, projectId = null) {
 
   for (const project of projects) {
     const { rows: bugs } = await db.query(
-      'SELECT * FROM bugs WHERE org_id=$1 AND project_id=$2 ORDER BY created_at ASC',
+      'SELECT * FROM bugs WHERE org_id=$1 AND project_id=$2 AND sheet_pushed_at IS NULL ORDER BY created_at ASC',
       [orgId, project.id]
     );
     if (bugs.length === 0) continue;
 
+    const { rows: countRows } = await db.query(
+      'SELECT COUNT(*)::int AS count FROM bugs WHERE org_id=$1 AND project_id=$2 AND sheet_pushed_at IS NOT NULL',
+      [orgId, project.id]
+    );
+    const startIndex = countRows[0]?.count || 0;
+
     const rows = bugs.map((bug, idx) => [
-      idx + 1,
+      startIndex + idx + 1,
       bug.title || '',
       bug.status || '',
       bug.priority || '',
@@ -227,7 +232,7 @@ async function pushToAppsScript(orgId, appsScriptUrl, projectId = null) {
 
   if (sheets.length === 0) return { nothing: true };
 
-  const result = await httpsPost(appsScriptUrl, { action: 'replace', sheets });
+  const result = await httpsPost(appsScriptUrl, { action: 'append', sheets });
   return { ...result, pushedIds: allPushedIds };
 }
 
