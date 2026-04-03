@@ -52,6 +52,11 @@ app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+function hasTokenMarkerCookie(req) {
+  const cookieHeader = req.headers.cookie || '';
+  return cookieHeader.split(';').some((part) => part.trim() === 'bt_has_token=1');
+}
+
 const camel = (row) => {
   if (!row) return null;
   const output = {};
@@ -1567,6 +1572,12 @@ app.post('/api/sheet-sync/run', auth, async (req, res) => {
   }
 });
 
+app.get('/', (req, res) => {
+  if (hasTokenMarkerCookie(req)) {
+    return res.sendFile(path.join(__dirname, 'public', 'login.html'));
+  }
+  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('/app',   (_req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('*', (req, res) => {

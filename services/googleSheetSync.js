@@ -5,7 +5,6 @@ const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
-const XLSX = require('xlsx');
 const db = require('../db');
 
 const SYNC_INTERVAL_MS = Math.max(Number(process.env.SHEET_SYNC_INTERVAL_MS || 3600000), 15000);
@@ -26,6 +25,12 @@ let lastStatus = {
   lastError: null,
 };
 let orgStatuses = {};
+let xlsxLib = null;
+
+function getXlsx() {
+  if (!xlsxLib) xlsxLib = require('xlsx');
+  return xlsxLib;
+}
 
 function log(message) {
   console.log(`[sheet-sync] ${message}`);
@@ -58,6 +63,7 @@ function download(url, dest) {
 }
 
 function parseWorkbookViaXlsx(xlsxPath) {
+  const XLSX = getXlsx();
   const workbook = XLSX.readFile(xlsxPath, {
     cellDates: false,
     cellNF: false,
@@ -497,6 +503,7 @@ function decodeDataUrl(value) {
 }
 
 function parseWorkbookFromBuffer(buffer) {
+  const XLSX = getXlsx();
   const workbook = XLSX.read(buffer, {
     type: 'buffer',
     cellDates: false,

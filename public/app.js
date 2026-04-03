@@ -5,9 +5,18 @@ const BRAND_LOGO = '/fixpulse-logo.png';
 // ── Token storage ──────────────────────────────────────────────────────────────
 const Token = {
   get:   ()  => localStorage.getItem('bt_token'),
-  set:   (t) => localStorage.setItem('bt_token', t),
-  clear: ()  => localStorage.removeItem('bt_token'),
+  set:   (t) => {
+    localStorage.setItem('bt_token', t);
+    document.cookie = `bt_has_token=1; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+  },
+  clear: ()  => {
+    localStorage.removeItem('bt_token');
+    document.cookie = 'bt_has_token=; path=/; max-age=0; SameSite=Lax';
+  },
 };
+if (Token.get()) {
+  document.cookie = `bt_has_token=1; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+}
 
 // ── Auth-aware API helpers ────────────────────────────────────────────────────
 const authHeaders = () => {
@@ -242,11 +251,29 @@ const ensureRazorpayLoaded = () => new Promise((resolve, reject) => {
   document.body.appendChild(script);
 });
 
+const ensureChartJsLoaded = () => new Promise((resolve, reject) => {
+  if (window.Chart) return resolve(window.Chart);
+  const existing = document.querySelector('script[data-chartjs]');
+  if (existing) {
+    existing.addEventListener('load', () => resolve(window.Chart), { once: true });
+    existing.addEventListener('error', () => reject(new Error('Unable to load charts')), { once: true });
+    return;
+  }
+  const script = document.createElement('script');
+  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js';
+  script.async = true;
+  script.dataset.chartjs = 'true';
+  script.onload = () => resolve(window.Chart);
+  script.onerror = () => reject(new Error('Unable to load charts'));
+  document.body.appendChild(script);
+});
+
 function SearchableSelect({ value, onChange, options, placeholder, width=180 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const rootRef = useRef(null);
   const selected = options.find(option => String(option.value) === String(value));
+  const normalizedOptions = options.filter(option => String(option.label) !== String(placeholder));
   const filteredOptions = options.filter(option => option.label.toLowerCase().includes(query.toLowerCase()));
 
   useEffect(() => {
@@ -280,26 +307,28 @@ function SearchableSelect({ value, onChange, options, placeholder, width=180 }) 
             onChange={e => setQuery(e.target.value)}
             placeholder={`Search ${placeholder.toLowerCase()}...`}
             autoFocus
-            style={{marginBottom:8}}
+            style={{marginBottom:8, border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'none'}}
           />
           <div style={{maxHeight:220, overflowY:'auto', display:'grid', gap:4}}>
             <button
               type="button"
-              className="btn btn-ghost btn-sm"
+              className={`btn btn-sm searchable-opt${!value ? ' searchable-opt--selected' : ''}`}
               onClick={() => { onChange(''); setOpen(false); }}
-              style={{justifyContent:'flex-start'}}
+              style={{justifyContent:'flex-start', border:'none', borderRadius:'var(--radius)'}}
             >
               {placeholder}
             </button>
             {filteredOptions.length === 0 ? (
               <div style={{padding:'8px 10px', fontSize:12, color:'var(--muted)'}}>No matching options</div>
-            ) : filteredOptions.map(option => (
+            ) : normalizedOptions
+              .filter(option => option.label.toLowerCase().includes(query.toLowerCase()))
+              .map(option => (
               <button
                 key={option.value}
                 type="button"
-                className="btn btn-ghost btn-sm"
+                className={`btn btn-sm searchable-opt${String(option.value) === String(value) ? ' searchable-opt--selected' : ''}`}
                 onClick={() => { onChange(option.value); setOpen(false); }}
-                style={{justifyContent:'flex-start', background:String(option.value) === String(value) ? 'var(--surface2)' : 'transparent'}}
+                style={{justifyContent:'flex-start', border:'none', borderRadius:'var(--radius)'}}
               >
                 {option.label}
               </button>
@@ -349,6 +378,16 @@ function useSheetSyncStatus() {
 function SyncTimestamp({ toast }) {
   const { syncStatus, refreshSyncStatus } = useSheetSyncStatus();
   const [syncing, setSyncing] = useState(false);
+  const syncDisplay = syncStatus?.lastSuccessAt
+    ? new Date(syncStatus.lastSuccessAt).toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      })
+    : 'Unavailable';
 
   const runManualSync = async () => {
     if (syncing || syncStatus?.running) return;
@@ -367,10 +406,10 @@ function SyncTimestamp({ toast }) {
   };
 
   return (
-    <div style={{marginLeft:'auto', textAlign:'right', display:'flex', alignItems:'center', gap:10}}>
+    <div style={{marginLeft:'auto', textAlign:'right', display:'flex', alignItems:'center', gap:12, padding:'8px 10px', border:'none', borderRadius:12, background:'transparent'}}>
       <div>
         <div style={{fontSize:11, fontWeight:600, color:'var(--text)', textTransform:'uppercase', letterSpacing:'0.04em'}}>Last Data Sync</div>
-        <div style={{fontSize:12, color:'var(--muted)'}}>{formatDateTime(syncStatus?.lastSuccessAt)}</div>
+        <div style={{fontSize:12, color:'var(--muted)', marginTop:2}}>{syncDisplay}</div>
       </div>
       <button
         type="button"
@@ -378,7 +417,7 @@ function SyncTimestamp({ toast }) {
         onClick={runManualSync}
         disabled={syncing || syncStatus?.running}
         title="Sync data now"
-        style={{padding:'6px 10px', minWidth:'auto'}}
+        style={{padding:'8px 10px', minWidth:'40px', minHeight:'40px', borderRadius:10}}
       >
         {syncing || syncStatus?.running ? '↻' : '⟳'}
       </button>
@@ -1158,10 +1197,14 @@ function BugListLegacy({ projects, users, currentProject, toast, currentUser }) 
   );
 }
 
-function Dashboard({ projects, users, currentProject, onNavigate, currentUser, toast }) {
+function Dashboard({ projects, users, currentProject, onSelectProject, currentUser, toast }) {
   const [stats, setStats] = useState(null);
-  const [recentBugs, setRecentBugs] = useState([]);
+  const [allBugs, setAllBugs] = useState([]);
   const [selectedBug, setSelectedBug] = useState(null);
+  const [chartsReady, setChartsReady] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+  const projectOptions = [{ value:'', label:'All Projects' }, ...projects.map(project => ({ value: project.id, label: project.name }))];
   const lineRef = useRef(null), doughnutRef = useRef(null), barRef = useRef(null);
   const lineChart = useRef(null), doughnutChart = useRef(null), barChart = useRef(null);
   const {
@@ -1178,18 +1221,30 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
     const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats';
     const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs';
     api.get(statsUrl).then(setStats);
-    api.get(bugsUrl).then(b => setRecentBugs(b.slice(0, 5)));
+    api.get(bugsUrl).then(setAllBugs);
+    setPage(1);
   }, [currentProject]);
 
   useEffect(() => {
+    let active = true;
     if (!stats || stats.error || !Array.isArray(stats.daily) || !stats.byStatus || !stats.byPriority) return;
-    if (lineChart.current) lineChart.current.destroy();
-    lineChart.current = new Chart(lineRef.current, { type:'line', data:{ labels:stats.daily.map(d => d.label), datasets:[{ label:'Issues', data:stats.daily.map(d => d.count), borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.15)', tension:0.4, fill:true, pointBackgroundColor:'#6366f1', pointRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
-    if (doughnutChart.current) doughnutChart.current.destroy();
-    doughnutChart.current = new Chart(doughnutRef.current, { type:'doughnut', data:{ labels:Object.keys(stats.byStatus), datasets:[{ data:Object.values(stats.byStatus), backgroundColor:['#475569','#6366f1','#fbbf24','#10b981'], borderWidth:0, hoverOffset:6 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', boxWidth:12, font:{ size:11 } } } } } });
-    if (barChart.current) barChart.current.destroy();
-    barChart.current = new Chart(barRef.current, { type:'bar', data:{ labels:Object.keys(stats.byPriority), datasets:[{ label:'Issues', data:Object.values(stats.byPriority), backgroundColor:['#ef4444','#fb923c','#fbbf24','#94a3b8'], borderRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ display:false }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
+    setChartsReady(false);
+    ensureChartJsLoaded()
+      .then((ChartLib) => {
+        if (!active || !lineRef.current || !doughnutRef.current || !barRef.current) return;
+        setChartsReady(true);
+        if (lineChart.current) lineChart.current.destroy();
+        lineChart.current = new ChartLib(lineRef.current, { type:'line', data:{ labels:stats.daily.map(d => d.label), datasets:[{ label:'Issues', data:stats.daily.map(d => d.count), borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.15)', tension:0.4, fill:true, pointBackgroundColor:'#6366f1', pointRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
+        if (doughnutChart.current) doughnutChart.current.destroy();
+        doughnutChart.current = new ChartLib(doughnutRef.current, { type:'doughnut', data:{ labels:Object.keys(stats.byStatus), datasets:[{ data:Object.values(stats.byStatus), backgroundColor:['#475569','#6366f1','#fbbf24','#10b981'], borderWidth:0, hoverOffset:6 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', boxWidth:12, font:{ size:11 } } } } } });
+        if (barChart.current) barChart.current.destroy();
+        barChart.current = new ChartLib(barRef.current, { type:'bar', data:{ labels:Object.keys(stats.byPriority), datasets:[{ label:'Issues', data:Object.values(stats.byPriority), backgroundColor:['#ef4444','#fb923c','#fbbf24','#94a3b8'], borderRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ display:false }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
+      })
+      .catch(() => {
+        if (active) setChartsReady(false);
+      });
     return () => {
+      active = false;
       if (lineChart.current) lineChart.current.destroy();
       if (doughnutChart.current) doughnutChart.current.destroy();
       if (barChart.current) barChart.current.destroy();
@@ -1212,8 +1267,14 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
       <div className="page-header">
         <div><h1>Dashboard</h1><p>{currentProject ? currentProject.name : 'All Projects'} · Overview</p></div>
         <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+          <SearchableSelect
+            value={currentProject?.id || ''}
+            onChange={value => onSelectProject?.(value || null)}
+            options={projectOptions}
+            placeholder="All Projects"
+            width={220}
+          />
           <button className="btn btn-ghost" onClick={openExportModal}>Export Report</button>
-          <button className="btn btn-primary" onClick={() => onNavigate('list')}>View All Issues →</button>
         </div>
       </div>
       <div className="stats-grid">
@@ -1222,18 +1283,40 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         ))}
       </div>
       <div className="charts-grid">
-        <div className="chart-card"><h3>Issues Created (Last 7 Days)</h3><div className="chart-wrap"><canvas ref={lineRef} /></div></div>
-        <div className="chart-card"><h3>By Status</h3><div className="chart-wrap"><canvas ref={doughnutRef} /></div></div>
-        <div className="chart-card"><h3>By Priority</h3><div className="chart-wrap"><canvas ref={barRef} /></div></div>
+        <div className="chart-card"><h3>Issues Created (Last 7 Days)</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart…</div>}<canvas ref={lineRef} style={{display:chartsReady?'block':'none'}} /></div></div>
+        <div className="chart-card"><h3>By Status</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart…</div>}<canvas ref={doughnutRef} style={{display:chartsReady?'block':'none'}} /></div></div>
+        <div className="chart-card"><h3>By Priority</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart…</div>}<canvas ref={barRef} style={{display:chartsReady?'block':'none'}} /></div></div>
       </div>
-      <div className="table-card" style={{padding:20}}>
-        <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:16}}>
-          <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',margin:0}}>Recent Issues</h3>
-          <SyncTimestamp toast={toast} />
-        </div>
-        <IssueTable bugs={recentBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
-      </div>
-      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0, 5)); }} onDelete={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const nextStats = await api.get(statsUrl); setStats(nextStats); setSelectedBug(null); }} />}
+      {(() => {
+        const totalPages = Math.max(1, Math.ceil(allBugs.length / pageSize));
+        const currentPage = Math.min(page, totalPages);
+        const paginatedBugs = allBugs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+        return (
+          <div className="table-card" style={{padding:20}}>
+            <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:16}}>
+              <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',margin:0}}>Issues</h3>
+              <SyncTimestamp toast={toast} />
+            </div>
+            {allBugs.length === 0
+              ? <div style={{color:'var(--muted)',fontSize:13,padding:'16px 0',textAlign:'center'}}>No issues found.</div>
+              : <>
+                  <IssueTable bugs={paginatedBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
+                  {totalPages > 1 && (
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'16px 0 0',flexWrap:'wrap'}}>
+                      <div style={{fontSize:12,color:'var(--muted)'}}>Showing {(currentPage-1)*pageSize+1}–{Math.min(currentPage*pageSize,allBugs.length)} of {allBugs.length}</div>
+                      <div style={{display:'flex',alignItems:'center',gap:8}}>
+                        <button className="btn btn-ghost btn-sm" disabled={currentPage===1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button>
+                        <span style={{fontSize:12,color:'var(--muted)'}}>Page {currentPage} of {totalPages}</span>
+                        <button className="btn btn-ghost btn-sm" disabled={currentPage===totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Next</button>
+                      </div>
+                    </div>
+                  )}
+                </>
+            }
+          </div>
+        );
+      })()}
+      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]); setStats(nextStats); setAllBugs(nextBugs); }} onDelete={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const nextStats = await api.get(statsUrl); setStats(nextStats); setSelectedBug(null); }} />}
       <ExportReportFiltersModal visible={showExportFilters} onClose={closeExportModal} currentProject={currentProject} projects={projects} users={users} exportFilters={exportFilters} setExportFilter={setExportFilter} onReset={resetExportFilters} onExport={exportReport} />
     </div>
   );
@@ -1244,6 +1327,13 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
   const [filters, setFilters] = useState({ status:'', priority:'', type:'', assigneeId:'', search:'' });
   const [showCreate, setShowCreate] = useState(false);
   const [selectedBug, setSelectedBug] = useState(null);
+  const [page, setPage] = useState(1);
+  const statusOptions = ['To Do','In Progress','In Review','Done'].map(value => ({ value, label: value }));
+  const priorityOptions = ['Critical','High','Medium','Low'].map(value => ({ value, label: value }));
+  const typeOptions = ['Bug','Feature','Task','Improvement'].map(value => ({ value, label: value }));
+  const assigneeOptions = users.map(user => ({ value: user.id, label: user.name }));
+  const pageSize = 20;
+  const { showExportFilters, exportFilters, setExportFilter, openExportModal, closeExportModal, resetExportFilters, exportReport } = useProjectReportExport({ currentProject, projects, users, toast });
   const load = useCallback(() => {
     const params = new URLSearchParams();
     if (currentProject) params.set('projectId', currentProject.id);
@@ -1252,18 +1342,22 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
   }, [currentProject, filters]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setPage(1); }, [currentProject, filters.status, filters.priority, filters.type, filters.assigneeId, filters.search]);
   const setFilter = (key, value) => setFilters(f => ({ ...f, [key]: value }));
+  const totalPages = Math.max(1, Math.ceil(bugs.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedBugs = bugs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div>
-      <div className="page-header"><div><h1>Issues</h1><p>{currentProject ? currentProject.name : 'All Projects'} · {bugs.length} issue{bugs.length!==1?'s':''}</p></div><button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ Create Issue</button></div>
+      <div className="page-header"><div><h1>Issue List</h1><p>{currentProject ? currentProject.name : 'All Projects'} · {bugs.length} issue{bugs.length!==1?'s':''}</p></div><div style={{display:'flex',gap:10}}><button className="btn btn-ghost" onClick={openExportModal}>Export Report</button><button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ Create Issue</button></div></div>
       <div className="filters-bar">
         <div style={{position:'relative'}}><span className="search-icon">🔍</span><input style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'7px 12px 7px 32px',color:'var(--text)',outline:'none',width:220}} placeholder="Search issues…" value={filters.search} onChange={e => setFilter('search', e.target.value)} /></div>
-        <select className="filter-select" value={filters.status} onChange={e => setFilter('status', e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s => <option key={s}>{s}</option>)}</select>
-        <select className="filter-select" value={filters.priority} onChange={e => setFilter('priority', e.target.value)}><option value="">All Priorities</option>{['Critical','High','Medium','Low'].map(p => <option key={p}>{p}</option>)}</select>
-        <select className="filter-select" value={filters.type} onChange={e => setFilter('type', e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t => <option key={t}>{t}</option>)}</select>
-        <select className="filter-select" value={filters.assigneeId} onChange={e => setFilter('assigneeId', e.target.value)}><option value="">All Assignees</option>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-        {Object.values(filters).some(Boolean) && <button className="btn btn-ghost btn-sm" onClick={() => setFilters({ status:'', priority:'', type:'', assigneeId:'', search:'' })}>Clear ✕</button>}
+        <SearchableSelect value={filters.status} onChange={value => setFilter('status', value)} options={statusOptions} placeholder="All Statuses" width={150} />
+        <SearchableSelect value={filters.priority} onChange={value => setFilter('priority', value)} options={priorityOptions} placeholder="All Priorities" width={150} />
+        <SearchableSelect value={filters.type} onChange={value => setFilter('type', value)} options={typeOptions} placeholder="All Types" width={150} />
+        <SearchableSelect value={filters.assigneeId} onChange={value => setFilter('assigneeId', value)} options={assigneeOptions} placeholder="All Assignees" width={230} />
+        {Object.values(filters).some(Boolean) && <button className="btn btn-ghost btn-sm" onClick={() => { setFilters({ status:'', priority:'', type:'', assigneeId:'', search:'' }); setPage(1); }}>Clear ✕</button>}
       </div>
       {bugs.length===0 ? <div className="empty-state"><div className="icon">🎉</div><h3>No issues found</h3><p>Try adjusting your filters or create a new issue.</p></div> : (
         <div className="table-card">
@@ -1271,11 +1365,24 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
             <div style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Recent Issues</div>
             <SyncTimestamp toast={toast} />
           </div>
-          <IssueTable bugs={bugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
+          <IssueTable bugs={paginatedBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
+          {totalPages > 1 && (
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'0 16px 16px',flexWrap:'wrap'}}>
+              <div style={{fontSize:12,color:'var(--muted)'}}>
+                Showing {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, bugs.length)} of {bugs.length}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <button className="btn btn-ghost btn-sm" disabled={currentPage===1} onClick={() => setPage(p => Math.max(1, p - 1))}>Previous</button>
+                <span style={{fontSize:12,color:'var(--muted)'}}>Page {currentPage} of {totalPages}</span>
+                <button className="btn btn-ghost btn-sm" disabled={currentPage===totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {showCreate && <BugModal projects={projects} users={users} currentProject={currentProject} onClose={() => setShowCreate(false)} toast={toast} onSave={() => { load(); setShowCreate(false); }} />}
       {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={() => load()} onDelete={() => load()} />}
+      <ExportReportFiltersModal visible={showExportFilters} onClose={closeExportModal} currentProject={currentProject} projects={projects} users={users} exportFilters={exportFilters} setExportFilter={setExportFilter} onReset={resetExportFilters} onExport={exportReport} />
     </div>
   );
 }
@@ -2367,6 +2474,7 @@ function App() {
   const [showSidebarProjectCreate, setShowSidebarProjectCreate] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [projectSearch, setProjectSearch] = useState('');
   const [toasts, setToasts]         = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [theme, setTheme]           = useState(() => localStorage.getItem('bt_theme') || 'light');
@@ -2391,14 +2499,15 @@ function App() {
     if (!token) { setAuthChecked(true); return; }
     api.get('/api/auth/me')
       .then(data => {
-        if (data.error) { Token.clear(); setAuthChecked(true); }
+        if (data.error) { Token.clear(); sessionStorage.removeItem('bt_root_redirecting'); setAuthChecked(true); }
         else {
           setAuthUser(data.user || data); setAuthOrg(data.org || null); setAuthChecked(true);
+          sessionStorage.removeItem('bt_root_redirecting');
           document.title = 'FixPulse - Bug Tracker';
           if (window.location.pathname === '/login') window.history.replaceState({}, '', '/app');
         }
       })
-      .catch(() => { Token.clear(); setAuthChecked(true); });
+      .catch(() => { Token.clear(); sessionStorage.removeItem('bt_root_redirecting'); setAuthChecked(true); });
   }, []);
 
   // ── Load app data after login ──
@@ -2442,6 +2551,7 @@ function App() {
   const handleAuth = (user, org) => {
     setAuthUser(user);
     setAuthOrg(org || null);
+    sessionStorage.removeItem('bt_root_redirecting');
     window.history.replaceState({}, '', '/app');
     document.title = 'FixPulse - Bug Tracker';
   };
@@ -2449,6 +2559,7 @@ function App() {
   const handleLogout = async () => {
     await api.post('/api/auth/logout', {});
     Token.clear();
+    sessionStorage.removeItem('bt_root_redirecting');
     setAuthUser(null);
     setAuthOrg(null);
     setProjects([]); setUsers([]); setAllBugs([]);
@@ -2458,9 +2569,13 @@ function App() {
   };
 
   const currentProject = projects.find(p => p.id === currentProjectId) || null;
+  const visibleProjects = projects.filter(project => project.name.toLowerCase().includes(projectSearch.toLowerCase()));
   const handleProjectCreated = project => {
     setCurrentProjectId(project.id);
     setView('projects');
+  };
+  const handleDashboardProjectSelect = projectId => {
+    setCurrentProjectId(projectId);
   };
   const navItems = [
     { id:'dashboard', label:'Dashboard', icon:'📊' },
@@ -2524,12 +2639,21 @@ function App() {
 
         <div className="sidebar-section">
           <div className="sidebar-label">Projects</div>
+          <div style={{padding:'0 12px 10px'}}>
+            <input
+              className="form-input"
+              value={projectSearch}
+              onChange={e=>setProjectSearch(e.target.value)}
+              placeholder="Search projects..."
+              style={{height:36, fontSize:13}}
+            />
+          </div>
           <div className={`sidebar-item ${!currentProjectId?'active':''}`} onClick={()=>setCurrentProjectId(null)}>
             <span style={{width:10,height:10,borderRadius:'50%',background:'var(--muted)',flexShrink:0}}/><span className="label">All Projects</span>
             <button className="btn-icon" style={{marginLeft:'auto',width:24,height:24,fontSize:14}} title="Create Project" onClick={e=>{e.stopPropagation();setShowSidebarProjectCreate(true);}}>+</button>
           </div>
-          {projects.map(p => (
-            <div key={p.id} className={`sidebar-item ${currentProjectId===p.id?'active':''}`} onClick={()=>setCurrentProjectId(p.id)}>
+          {visibleProjects.map(p => (
+            <div key={p.id} className={`sidebar-item ${currentProjectId===p.id?'active':''}`} onClick={()=>{ setCurrentProjectId(p.id); setView('list'); }}>
               <span style={{width:10,height:10,borderRadius:'50%',background:p.color,flexShrink:0}}/><span className="label">{p.name}</span>
             </div>
           ))}
@@ -2543,21 +2667,21 @@ function App() {
             {navItems.find(n=>n.id===view)?.icon} {navItems.find(n=>n.id===view)?.label}
             {currentProject&&<span style={{color:'var(--muted)',fontWeight:400,marginLeft:6}}>/ {currentProject.name}</span>}
           </span>
-          {onlineUsers.length > 0 && (
-            <div className="online-members" title={`${onlineUsers.length} online`}>
-              {onlineUsers.slice(0,5).map((u, i) => (
-                <div key={u.id} className="online-member-avatar" style={{zIndex: onlineUsers.length - i}} title={u.name}>
+          {(() => { const others = onlineUsers.filter(u => u.id !== authUser.id); return others.length > 0 && (
+            <div className="online-members" title={`${others.length} online`}>
+              {others.slice(0,5).map((u, i) => (
+                <div key={u.id} className="online-member-avatar" style={{zIndex: others.length - i}} title={u.name}>
                   {u.avatar && u.avatar.startsWith('data:image/')
                     ? <img src={u.avatar} alt={u.name} style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}} />
                     : <span>{String(u.name || '?').trim().charAt(0).toUpperCase() || '?'}</span>}
                   <span className="online-dot"/>
                 </div>
               ))}
-              {onlineUsers.length > 5 && (
-                <div className="online-member-avatar online-member-overflow" style={{zIndex:0}}>+{onlineUsers.length - 5}</div>
+              {others.length > 5 && (
+                <div className="online-member-avatar online-member-overflow" style={{zIndex:0}}>+{others.length - 5}</div>
               )}
             </div>
-          )}
+          ); })()}
           <button className="theme-toggle" onClick={toggleTheme} title={theme==='dark'?'Switch to light mode':'Switch to dark mode'}>
             {theme==='dark' ? '☀️' : '🌙'}
           </button>
@@ -2567,7 +2691,10 @@ function App() {
               <span style={{fontSize:11,color:'var(--muted)'}}>{ROLE_LABELS[authUser.role]||authUser.role}</span>
             </div>
             <button className="btn-ghost" style={{padding:0,border:'none',background:'transparent',display:'flex',alignItems:'center',gap:8}} onClick={()=>setShowProfileMenu(v=>!v)}>
-              <Avatar user={authUser} />
+              <div style={{position:'relative',display:'inline-flex'}}>
+                <Avatar user={authUser} />
+                <span style={{position:'absolute',bottom:1,right:1,width:9,height:9,borderRadius:'50%',background:'#22c55e',border:'2px solid var(--surface)',boxSizing:'border-box',display:'block'}}/>
+              </div>
               <span style={{fontSize:12,color:'var(--muted)'}}>▾</span>
             </button>
             {showProfileMenu && (
@@ -2584,7 +2711,7 @@ function App() {
         </div>
 
         <div className="content">
-          {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onNavigate={navigate} currentUser={authUser} toast={toast}/>}
+          {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onSelectProject={handleDashboardProjectSelect} currentUser={authUser} toast={toast}/>}
           {view==='board'     && <KanbanBoard projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}

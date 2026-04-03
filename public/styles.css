@@ -257,6 +257,9 @@ a { color: var(--primary); text-decoration: none; }
 .btn-primary:hover { background: var(--primary-h); }
 .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+.searchable-opt { background: var(--surface); color: var(--text); }
+.searchable-opt:hover { background: var(--surface2); color: var(--text); }
+.searchable-opt--selected { background: var(--primary) !important; color: #fff !important; }
 .btn-danger {
   background: rgba(239,68,68,.12); color: var(--danger);
   border: 1px solid rgba(239,68,68,.25);

@@ -7,6 +7,14 @@
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <link rel="shortcut icon" href="/favicon.ico" />
   <link rel="preload" as="image" href="/index-banner-hero.jpg" fetchpriority="high" />
+  <script>
+    (function () {
+      var token = localStorage.getItem('bt_token');
+      if (!token) return;
+      document.cookie = 'bt_has_token=1; path=/; max-age=' + (60 * 60 * 24 * 365) + '; SameSite=Lax';
+      window.location.replace('/app');
+    })();
+  </script>
   <style>
     :root {
       --bg: #f6f8fc;
@@ -430,14 +438,29 @@
     </section>
   </div>
   <script>
-    document.querySelectorAll('[data-loading-link]').forEach((link) => {
-      link.addEventListener('click', () => {
+    var loadingLinks = document.querySelectorAll('[data-loading-link]');
+    loadingLinks.forEach((link) => {
+      link.addEventListener('click', (e) => {
         if (link.getAttribute('aria-busy') === 'true') return;
+        e.preventDefault();
         const label = link.getAttribute('data-loading-link') || link.textContent.trim();
+        const href = link.href;
+        link.setAttribute('data-original-html', link.innerHTML);
         link.setAttribute('aria-busy', 'true');
         link.innerHTML = '<span class="btn-loader" aria-hidden="true"></span><span>Loading...</span>';
         link.setAttribute('aria-label', label + ' loading');
+        requestAnimationFrame(() => requestAnimationFrame(() => { window.location.href = href; }));
       });
+    });
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) {
+        loadingLinks.forEach((link) => {
+          const original = link.getAttribute('data-original-html');
+          if (original) { link.innerHTML = original; link.removeAttribute('data-original-html'); }
+          link.removeAttribute('aria-busy');
+          link.removeAttribute('aria-label');
+        });
+      }
     });
   </script>
 </body>
