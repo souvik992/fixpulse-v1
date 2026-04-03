@@ -219,60 +219,12 @@ const readFilesAsAttachments = files => Promise.all(
 const readImageAsDataUrl = file => new Promise((resolve, reject) => {
   if (!file || !file.type.startsWith('image/')) {
     return resolve(null); // Or handle error appropriately, e.g., reject('Only image files are allowed');
-const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.8) => new Promise((resolve, reject) => {
-  if (!file || !file.type.startsWith('image/')) return resolve(null);
-  if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-    return;
   }
-  const img = new Image();
   const reader = new FileReader();
   reader.onload = () => resolve(reader.result);
-  reader.onload = e => {
-    img.onload = () => {
-      let width = img.width, height = img.height;
-      if (width > maxWidth || height > maxHeight) {
-        const ratio = Math.min(maxWidth / width, maxHeight / height);
-        width = Math.round(width * ratio);
-        height = Math.round(height * ratio);
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/webp', quality));
-    };
-    img.onerror = reject;
-    img.src = e.target.result;
-  };
   reader.onerror = reject;
   reader.readAsDataURL(file);
 });
-
-const readFilesAsAttachments = files => Promise.all(
-  [...files]
-    .filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'))
-    .map(async file => {
-      if (file.type.startsWith('image/')) {
-        const dataUrl = await compressImage(file, 1920, 1080, 0.8);
-        const size = Math.round(dataUrl.length * 0.75);
-        const type = (file.type === 'image/gif' || file.type === 'image/svg+xml') ? file.type : 'image/webp';
-        return { name: file.name, type, size, dataUrl };
-      }
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve({ name: file.name, type: file.type, size: file.size, dataUrl: reader.result });
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    })
-);
-
-const readImageAsDataUrl = file => compressImage(file, 512, 512, 0.8);
 
 const readFileAsDataUrl = file => new Promise((resolve, reject) => {
   if (!file) return resolve(null);
@@ -2029,6 +1981,7 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
     dataSourceType: org?.dataSourceType || '',
     dataSourceUrl: org?.dataSourceUrl || '',
     dataSourceSyncEnabled: Boolean(org?.dataSourceSyncEnabled),
+    appsScriptUrl: org?.appsScriptUrl || '',
   });
   const [logoFile, setLogoFile] = useState(null);
   const [spreadsheetFile, setSpreadsheetFile] = useState(null);
