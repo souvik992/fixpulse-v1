@@ -109,6 +109,79 @@ function buildOrgPayload(orgRow) {
     priceLabel: plan.priceLabel,
     amountPaise: plan.amountPaise,
     currentUserCount: org.currentUserCount ?? undefined,
+    dataSourceType: org.dataSourceType || '',
+    dataSourceUrl: org.dataSourceUrl || '',
+    dataSourceSheetId: org.dataSourceSheetId || '',
+    dataSourceFileName: org.dataSourceFileName || '',
+    dataSourceSyncEnabled: Boolean(org.dataSourceSyncEnabled),
+    dataSourceLastSyncedAt: org.dataSourceLastSyncedAt || null,
+    dataSourceLastError: org.dataSourceLastError || null,
+  };
+}
+
+function extractGoogleSheetId(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const match = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(text)) return text;
+  return '';
+}
+
+function normalizeOrgDataSource(payload = {}, existing = {}) {
+  const next = {
+    dataSourceType: String(payload.dataSourceType || '').trim(),
+    dataSourceUrl: String(payload.dataSourceUrl || '').trim(),
+    dataSourceFileName: String(payload.dataSourceFileName || '').trim(),
+    dataSourceFileData: payload.dataSourceFileData || null,
+    dataSourceSyncEnabled: payload.dataSourceSyncEnabled === undefined
+      ? Boolean(existing.data_source_sync_enabled)
+      : Boolean(payload.dataSourceSyncEnabled),
+  };
+
+  if (!next.dataSourceType) {
+    return {
+      dataSourceType: null,
+      dataSourceUrl: null,
+      dataSourceSheetId: null,
+      dataSourceFileName: null,
+      dataSourceFileData: null,
+      dataSourceSyncEnabled: false,
+    };
+  }
+
+  if (next.dataSourceType === 'google_sheet') {
+    const sheetId = extractGoogleSheetId(next.dataSourceUrl);
+    if (!sheetId) throw new Error('Enter a valid Google Sheet link');
+    return {
+      dataSourceType: 'google_sheet',
+      dataSourceUrl: next.dataSourceUrl,
+      dataSourceSheetId: sheetId,
+      dataSourceFileName: null,
+      dataSourceFileData: null,
+      dataSourceSyncEnabled: next.dataSourceSyncEnabled,
+    };
+  }
+
+  if (!['xlsx', 'csv'].includes(next.dataSourceType)) {
+    throw new Error('Unsupported data source type');
+  }
+
+  const hasNewUpload = Boolean(next.dataSourceFileData);
+  if (hasNewUpload && !String(next.dataSourceFileData).startsWith('data:')) {
+    throw new Error('Invalid spreadsheet upload');
+  }
+  if (!hasNewUpload && !existing.data_source_file_data) {
+    throw new Error('Upload an Excel or CSV file');
+  }
+
+  return {
+    dataSourceType: next.dataSourceType,
+    dataSourceUrl: null,
+    dataSourceSheetId: null,
+    dataSourceFileName: next.dataSourceFileName || existing.data_source_file_name || null,
+    dataSourceFileData: hasNewUpload ? next.dataSourceFileData : existing.data_source_file_data || null,
+    dataSourceSyncEnabled: next.dataSourceSyncEnabled,
   };
 }
 
@@ -286,7 +359,23 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const { rows } = await db.query(
-      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color,o.logo AS org_logo,o.plan_code AS org_plan_code,o.user_limit AS org_user_limit FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.email=$1',
+      `SELECT u.*,
+              o.name AS org_name,
+              o.slug AS org_slug,
+              o.color AS org_color,
+              o.logo AS org_logo,
+              o.plan_code AS org_plan_code,
+              o.user_limit AS org_user_limit,
+              o.data_source_type AS org_data_source_type,
+              o.data_source_url AS org_data_source_url,
+              o.data_source_sheet_id AS org_data_source_sheet_id,
+              o.data_source_file_name AS org_data_source_file_name,
+              o.data_source_sync_enabled AS org_data_source_sync_enabled,
+              o.data_source_last_synced_at AS org_data_source_last_synced_at,
+              o.data_source_last_error AS org_data_source_last_error
+       FROM users u
+       JOIN organizations o ON o.id=u.org_id
+       WHERE u.email=$1`,
       [email]
     );
 
@@ -303,7 +392,22 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const user = camel(row);
-    const org = buildOrgPayload({ id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor, logo: user.orgLogo || '', plan_code: user.orgPlanCode, user_limit: user.orgUserLimit });
+    const org = buildOrgPayload({
+      id: user.orgId,
+      name: user.orgName,
+      slug: user.orgSlug,
+      color: user.orgColor,
+      logo: user.orgLogo || '',
+      plan_code: user.orgPlanCode,
+      user_limit: user.orgUserLimit,
+      data_source_type: user.orgDataSourceType,
+      data_source_url: user.orgDataSourceUrl,
+      data_source_sheet_id: user.orgDataSourceSheetId,
+      data_source_file_name: user.orgDataSourceFileName,
+      data_source_sync_enabled: user.orgDataSourceSyncEnabled,
+      data_source_last_synced_at: user.orgDataSourceLastSyncedAt,
+      data_source_last_error: user.orgDataSourceLastError,
+    });
     const token = jwt.sign(
       { id: user.id, orgId: user.orgId, email: user.email, name: user.name, role: user.role },
       JWT_SECRET,
@@ -319,7 +423,23 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/me', auth, async (req, res) => {
   try {
     const { rows } = await db.query(
-      'SELECT u.*,o.name AS org_name,o.slug AS org_slug,o.color AS org_color,o.logo AS org_logo,o.plan_code AS org_plan_code,o.user_limit AS org_user_limit FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.id=$1',
+      `SELECT u.*,
+              o.name AS org_name,
+              o.slug AS org_slug,
+              o.color AS org_color,
+              o.logo AS org_logo,
+              o.plan_code AS org_plan_code,
+              o.user_limit AS org_user_limit,
+              o.data_source_type AS org_data_source_type,
+              o.data_source_url AS org_data_source_url,
+              o.data_source_sheet_id AS org_data_source_sheet_id,
+              o.data_source_file_name AS org_data_source_file_name,
+              o.data_source_sync_enabled AS org_data_source_sync_enabled,
+              o.data_source_last_synced_at AS org_data_source_last_synced_at,
+              o.data_source_last_error AS org_data_source_last_error
+       FROM users u
+       JOIN organizations o ON o.id=u.org_id
+       WHERE u.id=$1`,
       [req.user.id]
     );
 
@@ -328,7 +448,22 @@ app.get('/api/auth/me', auth, async (req, res) => {
     }
 
     const user = camel(rows[0]);
-    const org = buildOrgPayload({ id: user.orgId, name: user.orgName, slug: user.orgSlug, color: user.orgColor, logo: user.orgLogo || '', plan_code: user.orgPlanCode, user_limit: user.orgUserLimit });
+    const org = buildOrgPayload({
+      id: user.orgId,
+      name: user.orgName,
+      slug: user.orgSlug,
+      color: user.orgColor,
+      logo: user.orgLogo || '',
+      plan_code: user.orgPlanCode,
+      user_limit: user.orgUserLimit,
+      data_source_type: user.orgDataSourceType,
+      data_source_url: user.orgDataSourceUrl,
+      data_source_sheet_id: user.orgDataSourceSheetId,
+      data_source_file_name: user.orgDataSourceFileName,
+      data_source_sync_enabled: user.orgDataSourceSyncEnabled,
+      data_source_last_synced_at: user.orgDataSourceLastSyncedAt,
+      data_source_last_error: user.orgDataSourceLastError,
+    });
     res.json({ user: strip(user), org });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -476,13 +611,46 @@ app.put('/api/org', auth, async (req, res) => {
     if (logoDataUrl && !logoDataUrl.startsWith('data:image/')) {
       return res.status(400).json({ error: 'Invalid organization logo data URL' });
     }
+    const existingResult = await db.query('SELECT * FROM organizations WHERE id=$1 LIMIT 1', [req.user.orgId]);
+    const existing = existingResult.rows[0];
+    if (!existing) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+    const sourceConfig = normalizeOrgDataSource(req.body, existing);
     const { rows } = await db.query(
-      'UPDATE organizations SET name=$1,color=$2,logo=COALESCE($4,logo) WHERE id=$3 RETURNING *',
-      [name, color, req.user.orgId, logoDataUrl]
+      `UPDATE organizations
+       SET name=$1,
+           color=$2,
+           logo=COALESCE($4,logo),
+           data_source_type=$5::text,
+           data_source_url=$6::text,
+           data_source_sheet_id=$7::text,
+           data_source_file_name=$8::text,
+           data_source_file_data=$9::text,
+           data_source_sync_enabled=$10,
+           data_source_last_error=CASE
+             WHEN $5::text IS NULL THEN NULL
+             ELSE data_source_last_error
+           END
+       WHERE id=$3
+       RETURNING *`,
+      [
+        name,
+        color,
+        req.user.orgId,
+        logoDataUrl,
+        sourceConfig.dataSourceType,
+        sourceConfig.dataSourceUrl,
+        sourceConfig.dataSourceSheetId,
+        sourceConfig.dataSourceFileName,
+        sourceConfig.dataSourceFileData,
+        sourceConfig.dataSourceSyncEnabled,
+      ]
     );
     res.json(buildOrgPayload(rows[0]));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const status = /valid Google Sheet link|Upload an Excel or CSV file|Invalid spreadsheet upload|Unsupported data source/.test(error.message) ? 400 : 500;
+    res.status(status).json({ error: error.message });
   }
 });
 
@@ -1383,7 +1551,7 @@ app.get('/api/presence', auth, (req, res) => {
 
 app.get('/api/sheet-sync/status', auth, async (req, res) => {
   try {
-    res.json(getGoogleSheetSyncStatus());
+    res.json(await getGoogleSheetSyncStatus(req.user.orgId));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1391,8 +1559,9 @@ app.get('/api/sheet-sync/status', auth, async (req, res) => {
 
 app.post('/api/sheet-sync/run', auth, async (req, res) => {
   try {
-    const started = triggerGoogleSheetSync();
-    res.json({ started, status: getGoogleSheetSyncStatus() });
+    const targetOrgId = req.user.role === 'admin' && req.body?.orgId ? req.body.orgId : req.user.orgId;
+    const started = triggerGoogleSheetSync(targetOrgId);
+    res.json({ started, status: await getGoogleSheetSyncStatus(targetOrgId) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -8,11 +8,11 @@ const { spawn } = require('child_process');
 const XLSX = require('xlsx');
 const db = require('../db');
 
-const SHEET_ID = process.env.GOOGLE_SHEET_ID || '1a41W8XdllH-lzTBQmO4QCaRQMURAQb0Z7Z2EQjL2jXU';
-const TARGET_ORG_NAME = process.env.GOOGLE_SHEET_TARGET_ORG || 'Twinleaves';
 const SYNC_INTERVAL_MS = Math.max(Number(process.env.SHEET_SYNC_INTERVAL_MS || 3600000), 15000);
 const ENABLED = String(process.env.SHEET_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const IGNORED_SHEETS = new Set(['Summary', 'Master']);
+const LEGACY_SHEET_ID = process.env.GOOGLE_SHEET_ID || '1a41W8XdllH-lzTBQmO4QCaRQMURAQb0Z7Z2EQjL2jXU';
+const LEGACY_TARGET_ORG_NAME = process.env.GOOGLE_SHEET_TARGET_ORG || 'Twinleaves';
 
 let syncTimer = null;
 let syncInFlight = false;
@@ -25,6 +25,7 @@ let lastStatus = {
   skipped: 0,
   lastError: null,
 };
+let orgStatuses = {};
 
 function log(message) {
   console.log(`[sheet-sync] ${message}`);
@@ -409,7 +410,7 @@ function buildIssueRecord(sheetName, rowNumber, headerMap, row) {
   return {
     sheetName,
     rowNumber,
-    sourceRef: `${SHEET_ID}:${sheetName}:${rowNumber}`,
+    sourceRef: '',
     sourceCreatedAt: inferredCreatedAt,
     title: title.length > 500 ? `${title.slice(0, 497)}...` : title,
     description,
@@ -464,12 +465,148 @@ async function ensureSchema() {
   await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS source_ref TEXT`);
   await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS source_hash TEXT`);
   await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS source_created_at TIMESTAMPTZ`);
+  await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_type TEXT`);
+  await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_url TEXT`);
+  await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_sheet_id TEXT`);
+  await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_file_name TEXT`);
+  await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_file_data TEXT`);
+  await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_sync_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
+  await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_last_synced_at TIMESTAMPTZ`);
+  await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_last_error TEXT`);
   await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bugs_source_unique ON bugs(source_kind, source_ref) WHERE source_kind IS NOT NULL AND source_ref IS NOT NULL`);
 }
 
-async function getTargetOrg() {
-  const { rows } = await db.query('SELECT * FROM organizations WHERE LOWER(name)=LOWER($1) ORDER BY created_at ASC LIMIT 1', [TARGET_ORG_NAME]);
-  return rows[0] || null;
+function extractGoogleSheetId(value) {
+  const text = cleanValue(value);
+  if (!text) return '';
+  const idMatch = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (idMatch) return idMatch[1];
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(text)) return text;
+  return '';
+}
+
+function decodeDataUrl(value) {
+  const text = cleanValue(value);
+  if (!text.startsWith('data:')) throw new Error('Invalid uploaded spreadsheet data');
+  const commaIndex = text.indexOf(',');
+  if (commaIndex < 0) throw new Error('Invalid uploaded spreadsheet data');
+  const meta = text.slice(5, commaIndex);
+  const payload = text.slice(commaIndex + 1);
+  const isBase64 = /;base64/i.test(meta);
+  return Buffer.from(payload, isBase64 ? 'base64' : 'utf8');
+}
+
+function parseWorkbookFromBuffer(buffer) {
+  const workbook = XLSX.read(buffer, {
+    type: 'buffer',
+    cellDates: false,
+    cellNF: false,
+    cellText: false,
+    dense: true,
+  });
+
+  return workbook.SheetNames.map((sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      raw: true,
+      defval: '',
+      blankrows: false,
+    }).map((row) => (Array.isArray(row) ? row.map((cell) => (cell === undefined || cell === null ? '' : String(cell))) : []));
+
+    return {
+      name: sheetName,
+      state: 'visible',
+      rows,
+    };
+  });
+}
+
+function normalizeWorkbookForSource(workbook, source) {
+  const sheets = normalizeWorkbook(workbook);
+  if (source.data_source_type !== 'csv' || sheets.length !== 1) return sheets;
+  const fileName = cleanValue(source.data_source_file_name).replace(/\.[^.]+$/, '');
+  if (!fileName) return sheets;
+  return sheets.map((sheet, index) => (index === 0 ? { ...sheet, name: fileName } : sheet));
+}
+
+async function ensureLegacyTargetConfigured() {
+  const sheetId = extractGoogleSheetId(LEGACY_SHEET_ID);
+  if (!sheetId || !LEGACY_TARGET_ORG_NAME) return;
+  await db.query(
+    `UPDATE organizations
+     SET data_source_type = COALESCE(NULLIF(data_source_type, ''), 'google_sheet'),
+         data_source_url = COALESCE(NULLIF(data_source_url, ''), $2),
+         data_source_sheet_id = COALESCE(NULLIF(data_source_sheet_id, ''), $3),
+         data_source_sync_enabled = CASE
+           WHEN data_source_sync_enabled IS TRUE THEN TRUE
+           ELSE TRUE
+         END
+     WHERE LOWER(name)=LOWER($1)`,
+    [LEGACY_TARGET_ORG_NAME, `https://docs.google.com/spreadsheets/d/${sheetId}/edit`, sheetId]
+  );
+}
+
+async function getSyncTargets(targetOrgId = null) {
+  const params = [];
+  let where = `
+    (
+      (data_source_type = 'google_sheet' AND COALESCE(data_source_sheet_id, '') <> '')
+      OR (data_source_type IN ('xlsx', 'csv') AND COALESCE(data_source_file_data, '') <> '')
+    )
+  `;
+  if (targetOrgId) {
+    params.push(targetOrgId);
+    where += ` AND id = $${params.length}`;
+  } else {
+    where += ` AND data_source_sync_enabled = TRUE`;
+  }
+  const { rows } = await db.query(
+    `SELECT *
+     FROM organizations
+     WHERE ${where}
+     ORDER BY created_at ASC`,
+    params
+  );
+  return rows;
+}
+
+function buildSourceRef(source, sheetName, rowNumber) {
+  const sourceId = source.data_source_type === 'google_sheet'
+    ? source.data_source_sheet_id
+    : `${source.id}:${cleanValue(source.data_source_file_name) || source.data_source_type}`;
+  return `${sourceId}:${sheetName}:${rowNumber}`;
+}
+
+async function loadWorkbookForTarget(target) {
+  if (target.data_source_type === 'google_sheet') {
+    const syncPath = path.join(process.cwd(), 'data', `live-sheet-sync-${target.id}-${process.pid}-${Date.now()}.xlsx`);
+    await download(`https://docs.google.com/spreadsheets/d/${target.data_source_sheet_id}/export?format=xlsx`, syncPath);
+    const workbook = parseWorkbookViaXlsx(syncPath);
+    try { fs.unlinkSync(syncPath); } catch {}
+    return normalizeWorkbookForSource(workbook, target);
+  }
+
+  if (target.data_source_type === 'xlsx' || target.data_source_type === 'csv') {
+    const workbook = parseWorkbookFromBuffer(decodeDataUrl(target.data_source_file_data));
+    return normalizeWorkbookForSource(workbook, target);
+  }
+
+  throw new Error(`Unsupported data source type "${target.data_source_type}"`);
+}
+
+function setOrgStatus(orgId, patch) {
+  orgStatuses[orgId] = {
+    running: false,
+    lastRunAt: null,
+    lastSuccessAt: null,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    lastError: null,
+    ...orgStatuses[orgId],
+    ...patch,
+  };
 }
 
 async function getSystemRoleId(roleName) {
@@ -529,27 +666,21 @@ async function nextBugKey(project) {
   return `${project.key}-${num}`;
 }
 
-async function syncOnce() {
-  if (syncInFlight) return;
-  syncInFlight = true;
-  lastStatus.running = true;
-  lastStatus.lastRunAt = new Date().toISOString();
+async function syncTarget(target) {
+  const runAt = new Date().toISOString();
+  setOrgStatus(target.id, {
+    running: true,
+    lastRunAt: runAt,
+    lastError: null,
+  });
+
   try {
-    await ensureSchema();
-    const org = await getTargetOrg();
-    if (!org) throw new Error(`Organization "${TARGET_ORG_NAME}" not found`);
-
-    const syncPath = path.join(process.cwd(), 'data', `live-sheet-sync-${process.pid}-${Date.now()}.xlsx`);
-    await download(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=xlsx`, syncPath);
-    const workbook = parseWorkbookViaXlsx(syncPath);
-    try { fs.unlinkSync(syncPath); } catch {}
-    const sheets = normalizeWorkbook(workbook);
-
+    const sheets = await loadWorkbookForTarget(target);
     const [{ rows: projectRows }, { rows: userRows }, { rows: allEmailsRows }, { rows: bugRows }] = await Promise.all([
-      db.query('SELECT * FROM projects WHERE org_id=$1 ORDER BY created_at ASC', [org.id]),
-      db.query('SELECT * FROM users WHERE org_id=$1 ORDER BY created_at ASC', [org.id]),
+      db.query('SELECT * FROM projects WHERE org_id=$1 ORDER BY created_at ASC', [target.id]),
+      db.query('SELECT * FROM users WHERE org_id=$1 ORDER BY created_at ASC', [target.id]),
       db.query('SELECT email FROM users'),
-      db.query('SELECT id, key, project_id, title, description, source_kind, source_ref, source_hash FROM bugs WHERE org_id=$1', [org.id]),
+      db.query('SELECT id, key, project_id, title, description, source_kind, source_ref, source_hash FROM bugs WHERE org_id=$1', [target.id]),
     ]);
 
     const projectByName = new Map(projectRows.map((row) => [row.name.toLowerCase(), row]));
@@ -575,10 +706,12 @@ async function syncOnce() {
     let skipped = 0;
 
     for (const sheet of sheets) {
-      const project = await ensureProject(org, sheet.name === 'WEB POS' ? 'webPOS' : sheet.name, projectByName, usedKeys);
-      for (const issue of sheet.issues) {
-        const assignee = issue.assigneeNames[0] ? await ensureUser(org, issue.assigneeNames[0], userByName, usedEmails, developerRoleId) : null;
-        const reporter = issue.reporterName ? await ensureUser(org, issue.reporterName, userByName, usedEmails, developerRoleId) : null;
+      const projectName = sheet.name === 'WEB POS' ? 'webPOS' : sheet.name;
+      const project = await ensureProject(target, projectName, projectByName, usedKeys);
+      for (const sheetIssue of sheet.issues) {
+        const issue = { ...sheetIssue, sourceRef: buildSourceRef(target, sheet.name, sheetIssue.rowNumber) };
+        const assignee = issue.assigneeNames[0] ? await ensureUser(target, issue.assigneeNames[0], userByName, usedEmails, developerRoleId) : null;
+        const reporter = issue.reporterName ? await ensureUser(target, issue.reporterName, userByName, usedEmails, developerRoleId) : null;
         const sourceHash = hashIssue(issue);
         const existing = existingBySourceRef.get(issue.sourceRef);
         const legacyKey = `${project.id}::${normalizeMatchText(issue.title)}`;
@@ -645,7 +778,7 @@ async function syncOnce() {
               $15,$16,$17,$18,COALESCE($18, NOW())
             ) RETURNING id, source_ref, source_hash`,
             [
-              org.id,
+              target.id,
               key,
               project.id,
               issue.title,
@@ -714,6 +847,65 @@ async function syncOnce() {
       }
     }
 
+    const completedAt = new Date().toISOString();
+    await db.query(
+      `UPDATE organizations
+       SET data_source_last_synced_at=$2,
+           data_source_last_error=NULL
+       WHERE id=$1`,
+      [target.id, completedAt]
+    );
+    setOrgStatus(target.id, {
+      running: false,
+      lastRunAt: runAt,
+      lastSuccessAt: completedAt,
+      created,
+      updated,
+      skipped,
+      lastError: null,
+    });
+    log(`sync complete for ${target.name}: created ${created}, updated ${updated}, skipped ${skipped}`);
+    return { created, updated, skipped, ok: true };
+  } catch (error) {
+    await db.query(
+      `UPDATE organizations
+       SET data_source_last_error=$2
+       WHERE id=$1`,
+      [target.id, error.message]
+    );
+    setOrgStatus(target.id, {
+      running: false,
+      lastRunAt: runAt,
+      lastError: error.message,
+    });
+    log(`sync failed for ${target.name}: ${error.message}`);
+    return { created: 0, updated: 0, skipped: 0, ok: false, error: error.message };
+  }
+}
+
+async function syncOnce(targetOrgId = null) {
+  if (syncInFlight) return;
+  syncInFlight = true;
+  lastStatus.running = true;
+  lastStatus.lastRunAt = new Date().toISOString();
+  try {
+    await ensureSchema();
+    await ensureLegacyTargetConfigured();
+    const targets = await getSyncTargets(targetOrgId);
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    let lastError = null;
+
+    for (const target of targets) {
+      const result = await syncTarget(target);
+      created += result.created || 0;
+      updated += result.updated || 0;
+      skipped += result.skipped || 0;
+      if (!result.ok) lastError = result.error;
+    }
+
     lastStatus = {
       running: false,
       lastRunAt: lastStatus.lastRunAt,
@@ -721,9 +913,9 @@ async function syncOnce() {
       created,
       updated,
       skipped,
-      lastError: null,
+      lastError,
     };
-    log(`sync complete: created ${created}, updated ${updated}, skipped ${skipped}`);
+    log(`sync cycle complete: ${targets.length} organization(s), created ${created}, updated ${updated}, skipped ${skipped}`);
   } catch (error) {
     lastStatus.running = false;
     lastStatus.lastError = error.message;
@@ -738,24 +930,55 @@ function startGoogleSheetSync() {
     log('disabled');
     return;
   }
-  log(`enabled for sheet ${SHEET_ID} every ${SYNC_INTERVAL_MS / 1000}s`);
+  log(`enabled for organization data sources every ${SYNC_INTERVAL_MS / 1000}s`);
   triggerGoogleSheetSync();
   syncTimer = setInterval(() => {
     triggerGoogleSheetSync();
   }, SYNC_INTERVAL_MS);
 }
 
-function getGoogleSheetSyncStatus() {
-  return { ...lastStatus, intervalMs: SYNC_INTERVAL_MS, enabled: ENABLED, sheetId: SHEET_ID };
+async function getGoogleSheetSyncStatus(targetOrgId = null) {
+  if (!targetOrgId) {
+    return {
+      ...lastStatus,
+      intervalMs: SYNC_INTERVAL_MS,
+      enabled: ENABLED,
+      orgStatuses,
+    };
+  }
+
+  const { rows } = await db.query(
+    `SELECT id, data_source_type, data_source_url, data_source_file_name, data_source_sync_enabled,
+            data_source_last_synced_at, data_source_last_error
+     FROM organizations
+     WHERE id=$1
+     LIMIT 1`,
+    [targetOrgId]
+  );
+  const orgRow = rows[0] || {};
+  return {
+    ...(orgStatuses[targetOrgId] || {}),
+    running: orgStatuses[targetOrgId]?.running || false,
+    intervalMs: SYNC_INTERVAL_MS,
+    enabled: ENABLED,
+    dataSourceType: orgRow.data_source_type || '',
+    dataSourceUrl: orgRow.data_source_url || '',
+    dataSourceFileName: orgRow.data_source_file_name || '',
+    dataSourceSyncEnabled: Boolean(orgRow.data_source_sync_enabled),
+    lastSuccessAt: orgStatuses[targetOrgId]?.lastSuccessAt || orgRow.data_source_last_synced_at || null,
+    lastError: orgStatuses[targetOrgId]?.lastError || orgRow.data_source_last_error || null,
+  };
 }
 
-function triggerGoogleSheetSync() {
+function triggerGoogleSheetSync(targetOrgId = null) {
   if (syncInFlight) return false;
   syncInFlight = true;
   lastStatus.running = true;
   lastStatus.lastRunAt = new Date().toISOString();
 
-  const child = spawn(process.execPath, [__filename], {
+  const childArgs = [__filename];
+  if (targetOrgId) childArgs.push('--org', targetOrgId);
+  const child = spawn(process.execPath, childArgs, {
     cwd: process.cwd(),
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -787,12 +1010,12 @@ function triggerGoogleSheetSync() {
         const parsed = JSON.parse(marker.replace('__SHEET_SYNC_STATUS__', ''));
         lastStatus = {
           ...lastStatus,
-          ...parsed,
+          ...parsed.global,
           running: false,
           intervalMs: SYNC_INTERVAL_MS,
           enabled: ENABLED,
-          sheetId: SHEET_ID,
         };
+        orgStatuses = { ...orgStatuses, ...(parsed.orgStatuses || {}) };
         return;
       } catch {}
     }
@@ -814,8 +1037,13 @@ module.exports = {
 if (require.main === module) {
   (async () => {
     await db.connect();
-    await syncOnce();
-    process.stdout.write(`__SHEET_SYNC_STATUS__${JSON.stringify(getGoogleSheetSyncStatus())}\n`);
+    const orgIndex = process.argv.indexOf('--org');
+    const targetOrgId = orgIndex >= 0 ? process.argv[orgIndex + 1] : null;
+    await syncOnce(targetOrgId);
+    process.stdout.write(`__SHEET_SYNC_STATUS__${JSON.stringify({
+      global: await getGoogleSheetSyncStatus(),
+      orgStatuses,
+    })}\n`);
     process.exit(0);
   })().catch((error) => {
     console.error(error);

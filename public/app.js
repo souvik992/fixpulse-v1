@@ -217,6 +217,14 @@ const readImageAsDataUrl = file => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+const readFileAsDataUrl = file => new Promise((resolve, reject) => {
+  if (!file) return resolve(null);
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
 const ensureRazorpayLoaded = () => new Promise((resolve, reject) => {
   if (window.Razorpay) return resolve(true);
   const existing = document.querySelector('script[data-razorpay-checkout]');
@@ -307,6 +315,152 @@ function SyncTimestamp({ toast }) {
       </button>
     </div>
   );
+}
+
+function IssueTable({ bugs, users, projects, currentProject, onSelectBug, emptyText='No issues found.' }) {
+  const showProjectColumn = !currentProject;
+
+  if (!bugs.length) {
+    return <div className="text-muted text-sm">{emptyText}</div>;
+  }
+
+  return (
+    <div className="table-scroll">
+      <table className="bug-table">
+        <thead>
+          <tr>
+            <th>Date Created</th>
+            <th>Issue Title</th>
+            {showProjectColumn && <th>Project Name</th>}
+            <th>Raised By</th>
+            <th>Issue Type</th>
+            <th>Assignee</th>
+            <th>Priority</th>
+            <th>Status</th>
+            <th>Last Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bugs.map(bug => {
+            const assignee = resolveIssueUser(bug, users, 'assigneeId', ['Assignee(s)', 'Assignee From Sheet']);
+            const reporter = resolveIssueUser(bug, users, 'reporterId', 'Raised By');
+            const project = projects.find(p => p.id === bug.projectId);
+            return (
+              <tr key={`compact-${bug.id}`} onClick={() => onSelectBug(bug.id)}>
+                <td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td>
+                <td><span className="issue-title">{bug.title}</span></td>
+                {showProjectColumn && <td><span className="text-muted text-sm">{project?.name || '—'}</span></td>}
+                <td>{reporter ? <div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs" /><span style={{fontSize:12}}>{reporter.name}</span></div> : <span className="text-muted text-sm">Unknown</span>}</td>
+                <td><TypeBadge t={bug.type} /></td>
+                <td>{assignee ? <div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs" /><span style={{fontSize:12}}>{assignee.name}</span></div> : <span className="text-muted text-sm">Unassigned</span>}</td>
+                <td><PriorityBadge p={bug.priority} /></td>
+                <td><StatusBadge s={bug.status} /></td>
+                <td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ExportReportFiltersModal({ visible, onClose, currentProject, projects, users, exportFilters, setExportFilter, onReset, onExport }) {
+  if (!visible) return null;
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="modal-header"><h2 className="modal-title">Export Report Filters</h2><button className="btn-icon" onClick={onClose}>✕</button></div>
+      <div className="modal-body">
+        {!currentProject && (
+          <div className="form-group">
+            <label className="form-label">Project</label>
+            <select className="form-select" value={exportFilters.projectId} onChange={e => setExportFilter('projectId', e.target.value)}>
+              <option value="">Select Project</option>
+              {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Starting Date</label><input className="form-input" type="date" value={exportFilters.startDate} onChange={e => setExportFilter('startDate', e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">Ending Date</label><input className="form-input" type="date" value={exportFilters.endDate} onChange={e => setExportFilter('endDate', e.target.value)} /></div>
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Assignee</label><select className="form-select" value={exportFilters.assigneeId} onChange={e => setExportFilter('assigneeId', e.target.value)}><option value="">All Assignees</option>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={exportFilters.priority} onChange={e => setExportFilter('priority', e.target.value)}><option value="">All Priorities</option>{['Critical','High','Medium','Low'].map(p => <option key={p} value={p}>{p}</option>)}</select></div>
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={exportFilters.status} onChange={e => setExportFilter('status', e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Issue Type</label><select className="form-select" value={exportFilters.type} onChange={e => setExportFilter('type', e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+        </div>
+      </div>
+      <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={onReset}>Reset</button><button type="button" className="btn btn-primary" onClick={onExport}>Export</button></div>
+    </Modal>
+  );
+}
+
+function useProjectReportExport({ currentProject, projects, users, toast }) {
+  const [showExportFilters, setShowExportFilters] = useState(false);
+  const [exportFilters, setExportFilters] = useState(REPORT_FILTER_DEFAULTS);
+
+  useEffect(() => {
+    setExportFilters(f => ({ ...f, projectId: currentProject?.id || '' }));
+  }, [currentProject]);
+
+  const setExportFilter = (key, value) => setExportFilters(f => ({ ...f, [key]: value }));
+  const openExportModal = () => setShowExportFilters(true);
+  const closeExportModal = () => setShowExportFilters(false);
+  const resetExportFilters = () => setExportFilters({ ...REPORT_FILTER_DEFAULTS, projectId: currentProject?.id || '' });
+
+  const exportReport = async () => {
+    const selectedProject = currentProject || projects.find(p => p.id === exportFilters.projectId);
+    if (!selectedProject) {
+      toast('Select a project to export its report', 'info');
+      return;
+    }
+
+    const popup = window.open('', '_blank');
+    if (!popup) {
+      toast('Allow pop-ups to open the HTML report', 'error');
+      return;
+    }
+
+    popup.document.write('<!doctype html><title>Preparing report...</title><body style="font-family:Arial,sans-serif;padding:24px">Preparing project report...</body>');
+
+    try {
+      const [reportStats, reportBugs] = await Promise.all([
+        api.get(`/api/stats?projectId=${selectedProject.id}`),
+        api.get(`/api/bugs?projectId=${selectedProject.id}`),
+      ]);
+      const filteredBugs = reportBugs.filter(bug => matchesReportFilters(bug, exportFilters));
+      const html = buildProjectReportHtml({
+        project: selectedProject,
+        stats: { ...reportStats, ...summarizeBugs(filteredBugs) },
+        bugs: filteredBugs,
+        users,
+        generatedAt: Date.now(),
+      });
+      const blob = new Blob([html], { type: 'text/html' });
+      const reportUrl = URL.createObjectURL(blob);
+      popup.location.href = reportUrl;
+      setTimeout(() => URL.revokeObjectURL(reportUrl), 60000);
+      closeExportModal();
+      toast('Project report opened in a new tab', 'success');
+    } catch (error) {
+      popup.close();
+      toast('Unable to generate project report', 'error');
+    }
+  };
+
+  return {
+    showExportFilters,
+    exportFilters,
+    setExportFilter,
+    openExportModal,
+    closeExportModal,
+    resetExportFilters,
+    exportReport,
+  };
 }
 
 function Toast({ toasts, dismiss }) {
@@ -812,54 +966,14 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
-function Dashboard({ projects, users, currentProject, onNavigate, currentUser, toast }) {
+function DashboardLegacy({ projects, users, currentProject, onNavigate, currentUser, toast }) {
   const [stats,setStats]=useState(null);
   const [recentBugs,setRecentBugs]=useState([]);
   const [selectedBug,setSelectedBug]=useState(null);
-  const [showExportFilters,setShowExportFilters]=useState(false);
-  const [exportFilters,setExportFilters]=useState(REPORT_FILTER_DEFAULTS);
   const lineRef=useRef(null),doughnutRef=useRef(null),barRef=useRef(null);
   const lineChart=useRef(null),doughnutChart=useRef(null),barChart=useRef(null);
+  const { showExportFilters, exportFilters, setExportFilter, openExportModal, closeExportModal, resetExportFilters, exportReport } = useProjectReportExport({ currentProject, projects, users, toast });
   useEffect(()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; api.get(url).then(setStats); const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; api.get(bu).then(b=>setRecentBugs(b.slice(0,5))); },[currentProject]);
-  useEffect(()=>{ setExportFilters(f=>({...f, projectId: currentProject?.id || ''})); },[currentProject]);
-  const setExportFilter = (k,v) => setExportFilters(f=>({...f,[k]:v}));
-  const openExportModal = () => setShowExportFilters(true);
-  const exportReport = async () => {
-    const selectedProject = currentProject || projects.find(p=>p.id===exportFilters.projectId);
-    if (!selectedProject) {
-      toast('Select a project to export its report', 'info');
-      return;
-    }
-    const popup = window.open('', '_blank');
-    if (!popup) {
-      toast('Allow pop-ups to open the HTML report', 'error');
-      return;
-    }
-    popup.document.write('<!doctype html><title>Preparing report...</title><body style="font-family:Arial,sans-serif;padding:24px">Preparing project report...</body>');
-    try {
-      const [reportStats, reportBugs] = await Promise.all([
-        api.get(`/api/stats?projectId=${selectedProject.id}`),
-        api.get(`/api/bugs?projectId=${selectedProject.id}`),
-      ]);
-      const filteredBugs = reportBugs.filter(bug => matchesReportFilters(bug, exportFilters));
-      const html = buildProjectReportHtml({
-        project: selectedProject,
-        stats: { ...reportStats, ...summarizeBugs(filteredBugs) },
-        bugs: filteredBugs,
-        users,
-        generatedAt: Date.now(),
-      });
-      const blob = new Blob([html], { type: 'text/html' });
-      const reportUrl = URL.createObjectURL(blob);
-      popup.location.href = reportUrl;
-      setTimeout(() => URL.revokeObjectURL(reportUrl), 60000);
-      setShowExportFilters(false);
-      toast('Project report opened in a new tab', 'success');
-    } catch (error) {
-      popup.close();
-      toast('Unable to generate project report', 'error');
-    }
-  };
   useEffect(()=>{
     if (!stats || stats.error || !Array.isArray(stats.daily) || !stats.byStatus || !stats.byPriority) return;
     if (lineChart.current) lineChart.current.destroy();
@@ -936,7 +1050,7 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
 }
 
 // ── BugList ───────────────────────────────────────────────────────────────────
-function BugList({ projects, users, currentProject, toast, currentUser }) {
+function BugListLegacy({ projects, users, currentProject, toast, currentUser }) {
   const [bugs,setBugs]=useState([]);
   const [filters,setFilters]=useState({status:'',priority:'',type:'',assigneeId:'',search:''});
   const [showCreate,setShowCreate]=useState(false);
@@ -970,6 +1084,128 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
       )}
       {showCreate&&<BugModal projects={projects} users={users} currentProject={currentProject} onClose={()=>setShowCreate(false)} toast={toast} onSave={()=>{load();setShowCreate(false);}}/>}
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={()=>load()} onDelete={id=>{setBugs(bs=>bs.filter(b=>b.id!==id));}}/>}
+    </div>
+  );
+}
+
+function Dashboard({ projects, users, currentProject, onNavigate, currentUser, toast }) {
+  const [stats, setStats] = useState(null);
+  const [recentBugs, setRecentBugs] = useState([]);
+  const [selectedBug, setSelectedBug] = useState(null);
+  const lineRef = useRef(null), doughnutRef = useRef(null), barRef = useRef(null);
+  const lineChart = useRef(null), doughnutChart = useRef(null), barChart = useRef(null);
+  const {
+    showExportFilters,
+    exportFilters,
+    setExportFilter,
+    openExportModal,
+    closeExportModal,
+    resetExportFilters,
+    exportReport,
+  } = useProjectReportExport({ currentProject, projects, users, toast });
+
+  useEffect(() => {
+    const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats';
+    const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs';
+    api.get(statsUrl).then(setStats);
+    api.get(bugsUrl).then(b => setRecentBugs(b.slice(0, 5)));
+  }, [currentProject]);
+
+  useEffect(() => {
+    if (!stats || stats.error || !Array.isArray(stats.daily) || !stats.byStatus || !stats.byPriority) return;
+    if (lineChart.current) lineChart.current.destroy();
+    lineChart.current = new Chart(lineRef.current, { type:'line', data:{ labels:stats.daily.map(d => d.label), datasets:[{ label:'Issues', data:stats.daily.map(d => d.count), borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.15)', tension:0.4, fill:true, pointBackgroundColor:'#6366f1', pointRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
+    if (doughnutChart.current) doughnutChart.current.destroy();
+    doughnutChart.current = new Chart(doughnutRef.current, { type:'doughnut', data:{ labels:Object.keys(stats.byStatus), datasets:[{ data:Object.values(stats.byStatus), backgroundColor:['#475569','#6366f1','#fbbf24','#10b981'], borderWidth:0, hoverOffset:6 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', boxWidth:12, font:{ size:11 } } } } } });
+    if (barChart.current) barChart.current.destroy();
+    barChart.current = new Chart(barRef.current, { type:'bar', data:{ labels:Object.keys(stats.byPriority), datasets:[{ label:'Issues', data:Object.values(stats.byPriority), backgroundColor:['#ef4444','#fb923c','#fbbf24','#94a3b8'], borderRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ display:false }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
+    return () => {
+      if (lineChart.current) lineChart.current.destroy();
+      if (doughnutChart.current) doughnutChart.current.destroy();
+      if (barChart.current) barChart.current.destroy();
+    };
+  }, [stats]);
+
+  if (!stats) return <div style={{color:'var(--muted)',padding:40,textAlign:'center'}}>Loading dashboard…</div>;
+  if (stats.error) {
+    return (
+      <div className="empty-state">
+        <div className="icon">🔒</div>
+        <h3>Dashboard Unavailable</h3>
+        <p>{stats.error}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <div><h1>Dashboard</h1><p>{currentProject ? currentProject.name : 'All Projects'} · Overview</p></div>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+          <button className="btn btn-ghost" onClick={openExportModal}>Export Report</button>
+          <button className="btn btn-primary" onClick={() => onNavigate('list')}>View All Issues →</button>
+        </div>
+      </div>
+      <div className="stats-grid">
+        {[{label:'Total Issues',value:stats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:stats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:stats.doneCount,sub:'marked as done',color:'#10b981'},{label:'Critical',value:stats.byPriority.Critical,sub:'critical priority',color:'#ef4444'}].map(card => (
+          <div key={card.label} className="stat-card"><div className="label">{card.label}</div><div className="value" style={{color:card.color}}>{card.value}</div><div className="sub">{card.sub}</div></div>
+        ))}
+      </div>
+      <div className="charts-grid">
+        <div className="chart-card"><h3>Issues Created (Last 7 Days)</h3><div className="chart-wrap"><canvas ref={lineRef} /></div></div>
+        <div className="chart-card"><h3>By Status</h3><div className="chart-wrap"><canvas ref={doughnutRef} /></div></div>
+        <div className="chart-card"><h3>By Priority</h3><div className="chart-wrap"><canvas ref={barRef} /></div></div>
+      </div>
+      <div className="table-card" style={{padding:20}}>
+        <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:16}}>
+          <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',margin:0}}>Recent Issues</h3>
+          <SyncTimestamp toast={toast} />
+        </div>
+        <IssueTable bugs={recentBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
+      </div>
+      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0, 5)); }} onDelete={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const nextStats = await api.get(statsUrl); setStats(nextStats); setSelectedBug(null); }} />}
+      <ExportReportFiltersModal visible={showExportFilters} onClose={closeExportModal} currentProject={currentProject} projects={projects} users={users} exportFilters={exportFilters} setExportFilter={setExportFilter} onReset={resetExportFilters} onExport={exportReport} />
+    </div>
+  );
+}
+
+function BugList({ projects, users, currentProject, toast, currentUser }) {
+  const [bugs, setBugs] = useState([]);
+  const [filters, setFilters] = useState({ status:'', priority:'', type:'', assigneeId:'', search:'' });
+  const [showCreate, setShowCreate] = useState(false);
+  const [selectedBug, setSelectedBug] = useState(null);
+  const load = useCallback(() => {
+    const params = new URLSearchParams();
+    if (currentProject) params.set('projectId', currentProject.id);
+    Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    api.get(`/api/bugs?${params}`).then(setBugs);
+  }, [currentProject, filters]);
+
+  useEffect(() => { load(); }, [load]);
+  const setFilter = (key, value) => setFilters(f => ({ ...f, [key]: value }));
+
+  return (
+    <div>
+      <div className="page-header"><div><h1>Issues</h1><p>{currentProject ? currentProject.name : 'All Projects'} · {bugs.length} issue{bugs.length!==1?'s':''}</p></div><button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ Create Issue</button></div>
+      <div className="filters-bar">
+        <div style={{position:'relative'}}><span className="search-icon">🔍</span><input style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'7px 12px 7px 32px',color:'var(--text)',outline:'none',width:220}} placeholder="Search issues…" value={filters.search} onChange={e => setFilter('search', e.target.value)} /></div>
+        <select className="filter-select" value={filters.status} onChange={e => setFilter('status', e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s => <option key={s}>{s}</option>)}</select>
+        <select className="filter-select" value={filters.priority} onChange={e => setFilter('priority', e.target.value)}><option value="">All Priorities</option>{['Critical','High','Medium','Low'].map(p => <option key={p}>{p}</option>)}</select>
+        <select className="filter-select" value={filters.type} onChange={e => setFilter('type', e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t => <option key={t}>{t}</option>)}</select>
+        <select className="filter-select" value={filters.assigneeId} onChange={e => setFilter('assigneeId', e.target.value)}><option value="">All Assignees</option>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+        {Object.values(filters).some(Boolean) && <button className="btn btn-ghost btn-sm" onClick={() => setFilters({ status:'', priority:'', type:'', assigneeId:'', search:'' })}>Clear ✕</button>}
+      </div>
+      {bugs.length===0 ? <div className="empty-state"><div className="icon">🎉</div><h3>No issues found</h3><p>Try adjusting your filters or create a new issue.</p></div> : (
+        <div className="table-card">
+          <div style={{display:'flex',alignItems:'flex-start',gap:12,padding:'16px 16px 0'}}>
+            <div style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Recent Issues</div>
+            <SyncTimestamp toast={toast} />
+          </div>
+          <IssueTable bugs={bugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
+        </div>
+      )}
+      {showCreate && <BugModal projects={projects} users={users} currentProject={currentProject} onClose={() => setShowCreate(false)} toast={toast} onSave={() => { load(); setShowCreate(false); }} />}
+      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={() => load()} onDelete={() => load()} />}
     </div>
   );
 }
@@ -1282,23 +1518,48 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
 
 // ── SettingsPage (admin only) ─────────────────────────────────────────────────
 function SettingsPage({ org, setOrg, currentUser, toast, users }) {
-  const [form, setForm] = useState({ name: org?.name||'', color: org?.color||'#6366f1' });
+  const [form, setForm] = useState({
+    name: org?.name||'',
+    color: org?.color||'#6366f1',
+    dataSourceType: org?.dataSourceType || '',
+    dataSourceUrl: org?.dataSourceUrl || '',
+    dataSourceSyncEnabled: Boolean(org?.dataSourceSyncEnabled),
+  });
   const [logoFile, setLogoFile] = useState(null);
+  const [spreadsheetFile, setSpreadsheetFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [planSaving, setPlanSaving] = useState('');
+  const [syncingSource, setSyncingSource] = useState(false);
   const setF = (k,v) => setForm(f=>({...f,[k]:v}));
 
   useEffect(() => {
-    setForm({ name: org?.name||'', color: org?.color||'#6366f1' });
-  }, [org?.name, org?.color]);
+    setForm({
+      name: org?.name||'',
+      color: org?.color||'#6366f1',
+      dataSourceType: org?.dataSourceType || '',
+      dataSourceUrl: org?.dataSourceUrl || '',
+      dataSourceSyncEnabled: Boolean(org?.dataSourceSyncEnabled),
+    });
+  }, [org?.name, org?.color, org?.dataSourceType, org?.dataSourceUrl, org?.dataSourceSyncEnabled]);
 
   const save = async e => {
     e.preventDefault();
     setSaving(true);
     const logoDataUrl = logoFile ? await readImageAsDataUrl(logoFile) : null;
-    const res = await api.put('/api/org', { ...form, logoDataUrl });
+    const fileDataUrl = spreadsheetFile ? await readFileAsDataUrl(spreadsheetFile) : null;
+    const normalizedType = form.dataSourceType || '';
+    const res = await api.put('/api/org', {
+      ...form,
+      logoDataUrl,
+      dataSourceType: normalizedType,
+      dataSourceUrl: normalizedType === 'google_sheet' ? form.dataSourceUrl : '',
+      dataSourceFileName: normalizedType === 'xlsx' || normalizedType === 'csv' ? (spreadsheetFile?.name || org?.dataSourceFileName || '') : '',
+      dataSourceFileData: normalizedType === 'xlsx' || normalizedType === 'csv' ? fileDataUrl : null,
+      dataSourceSyncEnabled: normalizedType ? form.dataSourceSyncEnabled : false,
+    });
     if (res.error) { toast(res.error,'error'); } else { setOrg(res); toast('Settings saved','success'); }
     setLogoFile(null);
+    setSpreadsheetFile(null);
     setSaving(false);
   };
 
@@ -1360,6 +1621,20 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
   };
 
   const currentUsers = users?.length || org?.currentUserCount || 0;
+  const sourceSummary = {
+    google_sheet: org?.dataSourceUrl || 'Google Sheet link saved',
+    xlsx: org?.dataSourceFileName || 'Excel file uploaded',
+    csv: org?.dataSourceFileName || 'CSV file uploaded',
+  };
+
+  const runSourceSync = async () => {
+    if (syncingSource || !org?.dataSourceType || !org?.dataSourceSyncEnabled) return;
+    setSyncingSource(true);
+    const res = await api.post('/api/sheet-sync/run', { orgId: org?.id });
+    if (res?.error) toast(res.error, 'error');
+    else toast(res.started ? 'Data sync started for this organization' : 'A data sync is already running', 'info');
+    setSyncingSource(false);
+  };
 
   return (
     <div>
@@ -1417,6 +1692,89 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
             <div className="form-group">
               <label className="form-label">Company Name</label>
               <input className="form-input" value={form.name} onChange={e=>setF('name',e.target.value)} required />
+            </div>
+            <div style={{marginTop:28,paddingTop:24,borderTop:'1px solid var(--border)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'flex-start',marginBottom:18,flexWrap:'wrap'}}>
+                <div>
+                  <h3 style={{fontSize:14,fontWeight:600,marginBottom:4}}>Issue Data Source</h3>
+                  <p style={{fontSize:13,color:'var(--muted)',lineHeight:1.6,maxWidth:620}}>
+                    Link a Google Sheet or upload an Excel/CSV file for this organisation. Each tab becomes a project and each matching row becomes an issue, just like the existing Twinleaves import flow.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={runSourceSync}
+                  disabled={syncingSource || !org?.dataSourceType}
+                >
+                  {syncingSource ? 'Syncing…' : 'Sync Now'}
+                </button>
+              </div>
+
+              {org?.dataSourceType && (
+                <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16,marginBottom:18}}>
+                  <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.04em',color:'var(--muted)',marginBottom:8}}>Current Source</div>
+                  <div style={{fontSize:14,fontWeight:600,marginBottom:6}}>
+                    {org.dataSourceType === 'google_sheet' ? 'Google Sheet Link' : org.dataSourceType === 'xlsx' ? 'Excel Upload' : 'CSV Upload'}
+                  </div>
+                  <div style={{fontSize:13,color:'var(--text)',wordBreak:'break-word',marginBottom:8}}>
+                    {sourceSummary[org.dataSourceType] || 'No source linked'}
+                  </div>
+                  <div style={{fontSize:12,color:'var(--muted)',display:'grid',gap:4}}>
+                    <div>Status: {org?.dataSourceSyncEnabled ? 'Sync enabled' : 'Sync paused'}</div>
+                    <div>Last synced: {formatDateTime(org?.dataSourceLastSyncedAt)}</div>
+                    {org?.dataSourceLastError && <div style={{color:'var(--danger)'}}>Last error: {org.dataSourceLastError}</div>}
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">Source Type</label>
+                <select className="form-select" value={form.dataSourceType} onChange={e=>{setF('dataSourceType', e.target.value); setSpreadsheetFile(null);}}>
+                  <option value="">No linked source</option>
+                  <option value="google_sheet">Google Sheet Link</option>
+                  <option value="xlsx">Excel Upload (.xlsx)</option>
+                  <option value="csv">CSV Upload (.csv)</option>
+                </select>
+              </div>
+
+              {form.dataSourceType === 'google_sheet' && (
+                <div className="form-group">
+                  <label className="form-label">Google Sheet Link</label>
+                  <input
+                    className="form-input"
+                    value={form.dataSourceUrl}
+                    onChange={e=>setF('dataSourceUrl',e.target.value)}
+                    placeholder="https://docs.google.com/spreadsheets/d/..."
+                  />
+                </div>
+              )}
+
+              {(form.dataSourceType === 'xlsx' || form.dataSourceType === 'csv') && (
+                <div className="form-group">
+                  <label className="form-label">{form.dataSourceType === 'xlsx' ? 'Excel File' : 'CSV File'}</label>
+                  <input
+                    className="form-input"
+                    type="file"
+                    accept={form.dataSourceType === 'xlsx' ? '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel' : '.csv,text/csv'}
+                    onChange={e=>setSpreadsheetFile(e.target.files?.[0] || null)}
+                  />
+                  <div style={{fontSize:12,color:'var(--muted)',marginTop:8}}>
+                    {spreadsheetFile?.name || org?.dataSourceFileName || 'No file uploaded yet'}
+                  </div>
+                </div>
+              )}
+
+              {!!form.dataSourceType && (
+                <label style={{display:'flex',alignItems:'center',gap:10,fontSize:13,color:'var(--text)',marginTop:4}}>
+                  <input
+                    type="checkbox"
+                    checked={form.dataSourceSyncEnabled}
+                    onChange={e=>setF('dataSourceSyncEnabled', e.target.checked)}
+                  />
+                  Keep this source linked for automatic sync
+                </label>
+              )}
             </div>
             <button type="submit" className="btn btn-primary" disabled={saving} style={{marginTop:8}}>{saving?'Saving…':'Save Changes'}</button>
           </form>

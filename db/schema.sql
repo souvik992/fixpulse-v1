@@ -12,6 +12,14 @@ CREATE TABLE IF NOT EXISTS organizations (
   logo        TEXT        NOT NULL DEFAULT '',
   plan_code   TEXT        NOT NULL DEFAULT 'enterprise',
   user_limit  INTEGER,
+  data_source_type TEXT,
+  data_source_url TEXT,
+  data_source_sheet_id TEXT,
+  data_source_file_name TEXT,
+  data_source_file_data TEXT,
+  data_source_sync_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  data_source_last_synced_at TIMESTAMPTZ,
+  data_source_last_error TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -21,6 +29,22 @@ ALTER TABLE organizations
   ADD COLUMN IF NOT EXISTS plan_code TEXT NOT NULL DEFAULT 'enterprise';
 ALTER TABLE organizations
   ADD COLUMN IF NOT EXISTS user_limit INTEGER;
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS data_source_type TEXT;
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS data_source_url TEXT;
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS data_source_sheet_id TEXT;
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS data_source_file_name TEXT;
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS data_source_file_data TEXT;
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS data_source_sync_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS data_source_last_synced_at TIMESTAMPTZ;
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS data_source_last_error TEXT;
 
 CREATE TABLE IF NOT EXISTS billing_orders (
   id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
