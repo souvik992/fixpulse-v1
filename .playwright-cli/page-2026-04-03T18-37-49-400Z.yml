@@ -1,0 +1,37 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - img "FixPulse" [ref=e6]
+        - generic [ref=e7]: FixPulse
+      - heading "Sign in faster and get straight to your issues." [level=1] [ref=e8]
+      - paragraph [ref=e9]: Clean bug tracking for teams that want clarity, not clutter. Use your workspace credentials to continue, or create a new company space in a few seconds.
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - strong [ref=e13]: Instant access
+        - text: to projects, issues, reports, and team workflows
+      - generic [ref=e14]:
+        - strong [ref=e16]: Lightweight sign-in page
+        - text: that loads before the full app shell
+      - generic [ref=e17]:
+        - strong [ref=e19]: New workspace setup
+        - text: for admins starting a fresh organization
+  - generic [ref=e20]:
+    - generic [ref=e21]:
+      - button "Sign In" [ref=e22] [cursor=pointer]
+      - button "Register" [ref=e23] [cursor=pointer]
+    - generic [ref=e24]:
+      - heading "Welcome back" [level=2] [ref=e25]
+      - paragraph [ref=e26]: Use your email and password to open your FixPulse workspace.
+      - generic [ref=e27]:
+        - generic [ref=e28]:
+          - generic [ref=e29]: Email
+          - textbox "Email" [ref=e30]
+        - generic [ref=e31]:
+          - generic [ref=e32]: Password
+          - textbox "Password" [ref=e33]
+        - generic [ref=e34]:
+          - button "Sign In" [ref=e35] [cursor=pointer]
+          - link "Back Home" [ref=e36] [cursor=pointer]:
+            - /url: /
+      - generic [ref=e37]: If your password was reset by an admin, use the temporary password first and then update it from Profile Settings after sign-in.

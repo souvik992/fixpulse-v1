@@ -97,18 +97,6 @@
       background: #fff;
       color: var(--primary);
     }
-    .btn[aria-busy="true"] {
-      pointer-events: none;
-      opacity: 0.82;
-    }
-    .btn-loader {
-      width: 14px;
-      height: 14px;
-      border: 2px solid currentColor;
-      border-right-color: transparent;
-      border-radius: 50%;
-      animation: spin .7s linear infinite;
-    }
     .btn-primary {
       background: var(--primary);
       border-color: var(--primary);
@@ -346,8 +334,8 @@
         <a href="/business-policy.html">Business Policy</a>
       </nav>
       <div class="actions">
-        <a class="btn" href="/login" data-loading-link="Login">Login</a>
-        <a class="btn btn-primary" href="/login" data-loading-link="Sign Up">Sign Up →</a>
+        <a class="btn" href="/login">Login</a>
+        <a class="btn btn-primary" href="/login">Sign Up →</a>
       </div>
     </header>
 
@@ -437,31 +425,5 @@
       <p class="footnote">Development mode is currently set to Enterprise so unlimited users can be tested locally.</p>
     </section>
   </div>
-  <script>
-    var loadingLinks = document.querySelectorAll('[data-loading-link]');
-    loadingLinks.forEach((link) => {
-      link.addEventListener('click', (e) => {
-        if (link.getAttribute('aria-busy') === 'true') return;
-        e.preventDefault();
-        const label = link.getAttribute('data-loading-link') || link.textContent.trim();
-        const href = link.href;
-        link.setAttribute('data-original-html', link.innerHTML);
-        link.setAttribute('aria-busy', 'true');
-        link.innerHTML = '<span class="btn-loader" aria-hidden="true"></span><span>Loading...</span>';
-        link.setAttribute('aria-label', label + ' loading');
-        requestAnimationFrame(() => requestAnimationFrame(() => { window.location.href = href; }));
-      });
-    });
-    window.addEventListener('pageshow', (e) => {
-      if (e.persisted) {
-        loadingLinks.forEach((link) => {
-          const original = link.getAttribute('data-original-html');
-          if (original) { link.innerHTML = original; link.removeAttribute('data-original-html'); }
-          link.removeAttribute('aria-busy');
-          link.removeAttribute('aria-label');
-        });
-      }
-    });
-  </script>
 </body>
 </html>

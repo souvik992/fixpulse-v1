@@ -2287,11 +2287,39 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     for (const t of p.sheets) {
       let sh = ss.getSheetByName(t.name) || ss.insertSheet(t.name);
-      sh.clearContents();
-      const rows = t.rows && t.rows.length ? [t.headers, ...t.rows] : [t.headers];
-      sh.getRange(1,1,rows.length,t.headers.length).setValues(rows);
-      sh.getRange(1,1,1,t.headers.length).setFontWeight('bold').setBackground('#4472C4').setFontColor('#ffffff');
-      sh.setFrozenRows(1);
+      const headers = t.headers || [];
+      const rows = t.rows || [];
+
+      if (p.action === 'add_tab') {
+        if (sh.getLastRow() === 0 && headers.length) {
+          sh.getRange(1,1,1,headers.length).setValues([headers]);
+        }
+      } else if (p.action === 'append') {
+        if (sh.getLastRow() === 0 && headers.length) {
+          sh.getRange(1,1,1,headers.length).setValues([headers]);
+        }
+        if (rows.length) {
+          sh.getRange(sh.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+        }
+      } else {
+        const allRows = rows.length ? [headers, ...rows] : [headers];
+        sh.clearContents();
+        sh.getRange(1,1,allRows.length,headers.length).setValues(allRows);
+      }
+
+      if (headers.length) {
+        sh.getRange(1,1,1,headers.length)
+          .setFontWeight('bold')
+          .setFontFamily('Arial')
+          .setFontSize(10)
+          .setBackground('#F6E3CC')
+          .setFontColor('#000000')
+          .setHorizontalAlignment('center')
+          .setVerticalAlignment('middle')
+          .setWrap(true)
+          .setBorder(true, true, true, true, true, true, '#D8C0A3', SpreadsheetApp.BorderStyle.SOLID);
+        sh.setFrozenRows(1);
+      }
     }
     return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
   } catch(err) {
@@ -2716,7 +2744,6 @@ function App() {
   };
   const navItems = [
     { id:'dashboard', label:'Dashboard', icon:'📊' },
-    { id:'board',     label:'Board',     icon:'📋' },
     { id:'list',      label:'Issues',    icon:'🐛' },
     { id:'projects',  label:'Projects',  icon:'📁' },
     { id:'team',      label:'Team',      icon:'👥' },
@@ -2725,7 +2752,10 @@ function App() {
       { id:'settings', label:'Settings',  icon:'⚙️' },
     ] : []),
   ];
-  const navigate = v => setView(v);
+
+  useEffect(() => {
+    if (view === 'board') setView('list');
+  }, [view]);
 
   useEffect(() => {
     const closeMenu = () => setShowProfileMenu(false);
@@ -2733,14 +2763,12 @@ function App() {
     return () => document.removeEventListener('click', closeMenu);
   }, []);
 
-  // ── Loading splash ──
   if (!authChecked) return (
     <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)', color:'var(--muted)' }}>
       Loading…
     </div>
   );
 
-  // ── Auth gate ──
   if (!authUser) return (
     <>
       <AuthPage onAuth={handleAuth}/>
@@ -2748,13 +2776,9 @@ function App() {
     </>
   );
 
-  // ── Company colour from org ──
-  const orgColor = authOrg?.color || '#6366f1';
-
   return (
     <div className="app">
       <aside className="sidebar">
-        {/* Company / Logo header */}
         <div className="sidebar-logo" style={{flexDirection:'column',alignItems:'flex-start',gap:0,paddingBottom:14}}>
           <div style={{display:'flex',alignItems:'center',gap:10,width:'100%'}}>
             <BrandLogo src={authOrg?.logo || BRAND_LOGO} size={44} rounded={12} />
@@ -2795,7 +2819,6 @@ function App() {
             </div>
           ))}
         </div>
-
       </aside>
 
       <main className="main">
@@ -2849,7 +2872,6 @@ function App() {
 
         <div className="content">
           {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onSelectProject={handleDashboardProjectSelect} currentUser={authUser} toast={toast} onSyncComplete={reloadData}/>}
-          {view==='board'     && <KanbanBoard projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser}/>}
           {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser} onSyncComplete={reloadData}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
           {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} setBugs={setAllBugs} projects={projects} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}

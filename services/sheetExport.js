@@ -176,13 +176,12 @@ function httpsPost(url, data, redirectsLeft = 5) {
 }
 
 /**
- * Build the sheets payload (same shape for both add_tab and push_all)
- * and post it to the org's configured Apps Script Web App URL.
- */
-/**
- * Incremental push: only bugs where sheet_pushed_at IS NULL are sent (append action).
- * Returns { nothing: true } if there are no unpushed bugs.
- * Returns { pushedIds: [...] } on success so the caller can mark bugs as pushed.
+ * Build the sheet payload and post it to the org's configured Apps Script URL.
+ *
+ * Important:
+ * We send full tab contents instead of only newly-created issues.
+ * That keeps write-back compatible with older Apps Script deployments
+ * that clear and rewrite the sheet on every request.
  */
 async function pushToAppsScript(orgId, appsScriptUrl, projectId = null) {
   const projectQuery = projectId
@@ -201,22 +200,14 @@ async function pushToAppsScript(orgId, appsScriptUrl, projectId = null) {
   const allPushedIds = [];
 
   for (const project of projects) {
-    // Only bugs not yet pushed to the sheet
     const { rows: bugs } = await db.query(
-      'SELECT * FROM bugs WHERE org_id=$1 AND project_id=$2 AND sheet_pushed_at IS NULL ORDER BY created_at ASC',
+      'SELECT * FROM bugs WHERE org_id=$1 AND project_id=$2 ORDER BY created_at ASC',
       [orgId, project.id]
     );
     if (bugs.length === 0) continue;
 
-    // S.No continues from the count of already-pushed bugs
-    const { rows: cr } = await db.query(
-      'SELECT COUNT(*) FROM bugs WHERE org_id=$1 AND project_id=$2 AND sheet_pushed_at IS NOT NULL',
-      [orgId, project.id]
-    );
-    const startNum = parseInt(cr[0].count, 10);
-
     const rows = bugs.map((bug, idx) => [
-      startNum + idx + 1,
+      idx + 1,
       bug.title || '',
       bug.status || '',
       bug.priority || '',
@@ -236,7 +227,7 @@ async function pushToAppsScript(orgId, appsScriptUrl, projectId = null) {
 
   if (sheets.length === 0) return { nothing: true };
 
-  const result = await httpsPost(appsScriptUrl, { action: 'append', sheets });
+  const result = await httpsPost(appsScriptUrl, { action: 'replace', sheets });
   return { ...result, pushedIds: allPushedIds };
 }
 

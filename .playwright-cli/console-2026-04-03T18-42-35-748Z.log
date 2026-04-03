@@ -1,0 +1,35 @@
+[   50656ms] [WARNING] You are using the in-browser Babel transformer. Be sure to precompile your scripts for production - https://babeljs.io/docs/setup/ @ https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js:0
+[  356659ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/presence/heartbeat:0
+[  356662ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/presence:0
+[  357602ms] TypeError: Failed to fetch
+    at Object.post (<anonymous>:70:12)
+    at beat (<anonymous>:8591:33)
+[  357609ms] TypeError: Failed to fetch
+    at Object.get (<anonymous>:63:12)
+    at poll (<anonymous>:8594:18)
+[  356911ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/sheet-sync/status:0
+[  386658ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/presence/heartbeat:0
+[  386658ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/presence:0
+[  386796ms] TypeError: Failed to fetch
+    at Object.post (<anonymous>:70:12)
+    at beat (<anonymous>:8591:33)
+[  386798ms] TypeError: Failed to fetch
+    at Object.get (<anonymous>:63:12)
+    at poll (<anonymous>:8594:18)
+[  417134ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/presence/heartbeat:0
+[  417137ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/presence:0
+[  417185ms] TypeError: Failed to fetch
+    at Object.post (<anonymous>:70:12)
+    at beat (<anonymous>:8591:33)
+[  417186ms] TypeError: Failed to fetch
+    at Object.get (<anonymous>:63:12)
+    at poll (<anonymous>:8594:18)
+[  417294ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/sheet-sync/status:0
+[ 2006620ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/presence/heartbeat:0
+[ 2006621ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/api/presence:0
+[ 2006679ms] TypeError: Failed to fetch
+    at Object.post (<anonymous>:70:12)
+    at beat (<anonymous>:8591:33)
+[ 2006680ms] TypeError: Failed to fetch
+    at Object.get (<anonymous>:63:12)
+    at poll (<anonymous>:8594:18)
