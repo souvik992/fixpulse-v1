@@ -10,7 +10,7 @@ const db = require('../db');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID || '1a41W8XdllH-lzTBQmO4QCaRQMURAQb0Z7Z2EQjL2jXU';
 const TARGET_ORG_NAME = process.env.GOOGLE_SHEET_TARGET_ORG || 'Twinleaves';
-const SYNC_INTERVAL_MS = Math.max(Number(process.env.SHEET_SYNC_INTERVAL_MS || 300000), 15000);
+const SYNC_INTERVAL_MS = Math.max(Number(process.env.SHEET_SYNC_INTERVAL_MS || 3600000), 15000);
 const ENABLED = String(process.env.SHEET_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const IGNORED_SHEETS = new Set(['Summary', 'Master']);
 
@@ -750,7 +750,7 @@ function getGoogleSheetSyncStatus() {
 }
 
 function triggerGoogleSheetSync() {
-  if (syncInFlight) return;
+  if (syncInFlight) return false;
   syncInFlight = true;
   lastStatus.running = true;
   lastStatus.lastRunAt = new Date().toISOString();
@@ -799,11 +799,14 @@ function triggerGoogleSheetSync() {
 
     lastStatus.lastError = code === 0 ? 'Unable to parse sync result' : `Sync worker exited with code ${code}`;
   });
+
+  return true;
 }
 
 module.exports = {
   startGoogleSheetSync,
   getGoogleSheetSyncStatus,
+  triggerGoogleSheetSync,
   parseWorkbookViaXlsx,
   normalizeWorkbook,
 };

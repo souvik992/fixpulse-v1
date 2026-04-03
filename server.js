@@ -11,7 +11,7 @@ const { sendAssigneeNotification, sendPasswordResetEmail } = require('./utils/em
 const { randomUUID } = require('crypto');
 const { PERMISSIONS } = require('./rbac/permissions');
 const { checkPermission, assignSystemRole, getUserPermissions, LEGACY_TO_RBAC } = require('./rbac/middleware');
-const { startGoogleSheetSync, getGoogleSheetSyncStatus } = require('./services/googleSheetSync');
+const { startGoogleSheetSync, getGoogleSheetSyncStatus, triggerGoogleSheetSync } = require('./services/googleSheetSync');
 
 // ── In-memory presence store ──────────────────────────────────────────────────
 // Map<orgId, Map<userId, { lastSeen: Date, user: { id, name, avatar, color } }>>
@@ -1384,6 +1384,15 @@ app.get('/api/presence', auth, (req, res) => {
 app.get('/api/sheet-sync/status', auth, async (req, res) => {
   try {
     res.json(getGoogleSheetSyncStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/sheet-sync/run', auth, async (req, res) => {
+  try {
+    const started = triggerGoogleSheetSync();
+    res.json({ started, status: getGoogleSheetSyncStatus() });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

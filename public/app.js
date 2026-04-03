@@ -77,7 +77,7 @@ const renderPriorityBars = stats => {
     </div>
   `).join('');
 };
-const REPORT_FILTER_DEFAULTS = { startDate:'', endDate:'', assigneeId:'', priority:'', status:'', type:'' };
+const REPORT_FILTER_DEFAULTS = { projectId:'', startDate:'', endDate:'', assigneeId:'', priority:'', status:'', type:'' };
 const matchesReportFilters = (bug, filters) => {
   const createdAt = getIssueCreatedDate(bug);
   if (filters.startDate || filters.endDate) {
@@ -238,34 +238,73 @@ const ensureRazorpayLoaded = () => new Promise((resolve, reject) => {
 function useSheetSyncStatus() {
   const [syncStatus, setSyncStatus] = useState(null);
 
+  const loadStatus = useCallback(async () => {
+    try {
+      const status = await api.get('/api/sheet-sync/status');
+      if (!status?.error) setSyncStatus(status);
+      return status;
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
-
-    const loadStatus = async () => {
-      try {
-        const status = await api.get('/api/sheet-sync/status');
-        if (active && !status?.error) setSyncStatus(status);
-      } catch {}
+    const guardedLoad = async () => {
+      const status = await loadStatus();
+      if (!active || !status?.running) return;
+      setTimeout(() => {
+        if (active) guardedLoad();
+      }, 5000);
     };
 
-    loadStatus();
+    guardedLoad();
     const timer = setInterval(loadStatus, 60000);
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [loadStatus]);
 
-  return syncStatus;
+  return { syncStatus, refreshSyncStatus: loadStatus };
 }
 
-function SyncTimestamp() {
-  const syncStatus = useSheetSyncStatus();
+function SyncTimestamp({ toast }) {
+  const { syncStatus, refreshSyncStatus } = useSheetSyncStatus();
+  const [syncing, setSyncing] = useState(false);
+
+  const runManualSync = async () => {
+    if (syncing || syncStatus?.running) return;
+    setSyncing(true);
+    try {
+      const result = await api.post('/api/sheet-sync/run', {});
+      if (result?.error) {
+        toast?.(result.error, 'error');
+      } else {
+        toast?.(result.started ? 'Manual data sync started' : 'Data sync is already running', 'info');
+        setTimeout(() => { refreshSyncStatus(); }, 1500);
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
-    <div style={{marginLeft:'auto', textAlign:'right'}}>
-      <div style={{fontSize:11, fontWeight:600, color:'var(--text)', textTransform:'uppercase', letterSpacing:'0.04em'}}>Last Data Sync</div>
-      <div style={{fontSize:12, color:'var(--muted)'}}>{formatDateTime(syncStatus?.lastSuccessAt)}</div>
+    <div style={{marginLeft:'auto', textAlign:'right', display:'flex', alignItems:'center', gap:10}}>
+      <div>
+        <div style={{fontSize:11, fontWeight:600, color:'var(--text)', textTransform:'uppercase', letterSpacing:'0.04em'}}>Last Data Sync</div>
+        <div style={{fontSize:12, color:'var(--muted)'}}>{formatDateTime(syncStatus?.lastSuccessAt)}</div>
+      </div>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={runManualSync}
+        disabled={syncing || syncStatus?.running}
+        title="Sync data now"
+        style={{padding:'6px 10px', minWidth:'auto'}}
+      >
+        {syncing || syncStatus?.running ? '↻' : '⟳'}
+      </button>
     </div>
   );
 }
@@ -782,15 +821,15 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
   const lineRef=useRef(null),doughnutRef=useRef(null),barRef=useRef(null);
   const lineChart=useRef(null),doughnutChart=useRef(null),barChart=useRef(null);
   useEffect(()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; api.get(url).then(setStats); const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; api.get(bu).then(b=>setRecentBugs(b.slice(0,5))); },[currentProject]);
+  useEffect(()=>{ setExportFilters(f=>({...f, projectId: currentProject?.id || ''})); },[currentProject]);
   const setExportFilter = (k,v) => setExportFilters(f=>({...f,[k]:v}));
-  const openExportModal = () => {
-    if (!currentProject) {
-      toast('Select a project first to export its report', 'info');
+  const openExportModal = () => setShowExportFilters(true);
+  const exportReport = async () => {
+    const selectedProject = currentProject || projects.find(p=>p.id===exportFilters.projectId);
+    if (!selectedProject) {
+      toast('Select a project to export its report', 'info');
       return;
     }
-    setShowExportFilters(true);
-  };
-  const exportReport = async () => {
     const popup = window.open('', '_blank');
     if (!popup) {
       toast('Allow pop-ups to open the HTML report', 'error');
@@ -799,12 +838,12 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
     popup.document.write('<!doctype html><title>Preparing report...</title><body style="font-family:Arial,sans-serif;padding:24px">Preparing project report...</body>');
     try {
       const [reportStats, reportBugs] = await Promise.all([
-        api.get(`/api/stats?projectId=${currentProject.id}`),
-        api.get(`/api/bugs?projectId=${currentProject.id}`),
+        api.get(`/api/stats?projectId=${selectedProject.id}`),
+        api.get(`/api/bugs?projectId=${selectedProject.id}`),
       ]);
       const filteredBugs = reportBugs.filter(bug => matchesReportFilters(bug, exportFilters));
       const html = buildProjectReportHtml({
-        project: currentProject,
+        project: selectedProject,
         stats: { ...reportStats, ...summarizeBugs(filteredBugs) },
         bugs: filteredBugs,
         users,
@@ -855,11 +894,11 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
       <div className="table-card" style={{padding:20}}>
         <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:16}}>
           <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',margin:0}}>Recent Issues</h3>
-          <SyncTimestamp />
+          <SyncTimestamp toast={toast} />
         </div>
         {recentBugs.length===0?<div className="text-muted text-sm">No issues found.</div>:(
-          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th><th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
-          <tbody>{recentBugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
+          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th>{!currentProject&&<th>Project Name</th>}<th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
+          <tbody>{recentBugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td>{!currentProject&&<td><span className="text-muted text-sm">{project?.name||'—'}</span></td>}<td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
         )}
       </div>
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const nextStats = await api.get(url); setStats(nextStats); setSelectedBug(null); }}/>}
@@ -867,6 +906,15 @@ function Dashboard({ projects, users, currentProject, onNavigate, currentUser, t
         <Modal onClose={()=>setShowExportFilters(false)}>
           <div className="modal-header"><h2 className="modal-title">Export Report Filters</h2><button className="btn-icon" onClick={()=>setShowExportFilters(false)}>✕</button></div>
           <div className="modal-body">
+            {!currentProject&&(
+              <div className="form-group">
+                <label className="form-label">Project</label>
+                <select className="form-select" value={exportFilters.projectId} onChange={e=>setExportFilter('projectId',e.target.value)}>
+                  <option value="">Select Project</option>
+                  {projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}
+                </select>
+              </div>
+            )}
             <div className="form-row">
               <div className="form-group"><label className="form-label">Starting Date</label><input className="form-input" type="date" value={exportFilters.startDate} onChange={e=>setExportFilter('startDate',e.target.value)} /></div>
               <div className="form-group"><label className="form-label">Ending Date</label><input className="form-input" type="date" value={exportFilters.endDate} onChange={e=>setExportFilter('endDate',e.target.value)} /></div>
@@ -911,10 +959,10 @@ function BugList({ projects, users, currentProject, toast, currentUser }) {
         <div className="table-card">
           <div style={{display:'flex',alignItems:'flex-start',gap:12,padding:'16px 16px 0'}}>
             <div style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Recent Issues</div>
-            <SyncTimestamp />
+            <SyncTimestamp toast={toast} />
           </div>
-          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th><th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
-          <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
+          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th>{!currentProject&&<th>Project Name</th>}<th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
+          <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td>{!currentProject&&<td><span className="text-muted text-sm">{project?.name||'—'}</span></td>}<td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
           <div className="table-scroll" style={{display:'none'}}><table className="bug-table"><thead><tr><th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Raised By</th><th>Project</th><th>Created</th></tr></thead>
           <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);const createdAt=getIssueCreatedDate(bug);return(<tr key={bug.id} onClick={()=>setSelectedBug(bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><TypeBadge t={bug.type}/></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td>{project&&<div style={{display:'flex',alignItems:'center',gap:5}}><div style={{width:8,height:8,borderRadius:'50%',background:project.color}}/><span style={{fontSize:12,color:'var(--muted)'}}>{project.name}</span></div>}</td><td><span className="text-muted text-sm">{createdAt?timeAgo(createdAt):'Unavailable'}</span></td></tr>);})}</tbody></table>
           </div>
