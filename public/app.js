@@ -2300,7 +2300,11 @@ function App() {
     api.get('/api/auth/me')
       .then(data => {
         if (data.error) { Token.clear(); setAuthChecked(true); }
-        else { setAuthUser(data.user || data); setAuthOrg(data.org || null); setAuthChecked(true); }
+        else {
+          setAuthUser(data.user || data); setAuthOrg(data.org || null); setAuthChecked(true);
+          document.title = 'FixPulse - Bug Tracker';
+          if (window.location.pathname === '/login') window.history.replaceState({}, '', '/app');
+        }
       })
       .catch(() => { Token.clear(); setAuthChecked(true); });
   }, []);
@@ -2346,6 +2350,8 @@ function App() {
   const handleAuth = (user, org) => {
     setAuthUser(user);
     setAuthOrg(org || null);
+    window.history.replaceState({}, '', '/app');
+    document.title = 'FixPulse - Bug Tracker';
   };
 
   const handleLogout = async () => {
@@ -2354,6 +2360,8 @@ function App() {
     setAuthUser(null);
     setAuthOrg(null);
     setProjects([]); setUsers([]); setAllBugs([]);
+    document.title = 'FixPulse - Login';
+    window.history.replaceState({}, '', '/login');
     toast('Logged out successfully', 'info');
   };
 
