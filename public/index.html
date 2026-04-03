@@ -89,6 +89,18 @@
       background: #fff;
       color: var(--primary);
     }
+    .btn[aria-busy="true"] {
+      pointer-events: none;
+      opacity: 0.82;
+    }
+    .btn-loader {
+      width: 14px;
+      height: 14px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
     .btn-primary {
       background: var(--primary);
       border-color: var(--primary);
@@ -308,6 +320,9 @@
         grid-template-columns: 1fr;
       }
     }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -323,8 +338,8 @@
         <a href="/business-policy.html">Business Policy</a>
       </nav>
       <div class="actions">
-        <a class="btn" href="/login">Login</a>
-        <a class="btn btn-primary" href="/login">Sign Up →</a>
+        <a class="btn" href="/login" data-loading-link="Login">Login</a>
+        <a class="btn btn-primary" href="/login" data-loading-link="Sign Up">Sign Up →</a>
       </div>
     </header>
 
@@ -414,5 +429,16 @@
       <p class="footnote">Development mode is currently set to Enterprise so unlimited users can be tested locally.</p>
     </section>
   </div>
+  <script>
+    document.querySelectorAll('[data-loading-link]').forEach((link) => {
+      link.addEventListener('click', () => {
+        if (link.getAttribute('aria-busy') === 'true') return;
+        const label = link.getAttribute('data-loading-link') || link.textContent.trim();
+        link.setAttribute('aria-busy', 'true');
+        link.innerHTML = '<span class="btn-loader" aria-hidden="true"></span><span>Loading...</span>';
+        link.setAttribute('aria-label', label + ' loading');
+      });
+    });
+  </script>
 </body>
 </html>

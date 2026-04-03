@@ -1532,8 +1532,16 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
     navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   };
 
+  const [search, setSearch] = useState('');
+
   const roleOrder = { admin:0, project_manager:1, developer:2, frontend_developer:3, backend_developer:4, tester:5, qa:5, viewer:6 };
-  const sorted = [...users].sort((a,b) => (roleOrder[a.role]||9) - (roleOrder[b.role]||9));
+  const sorted = [...users]
+    .sort((a,b) => (roleOrder[a.role]||9) - (roleOrder[b.role]||9))
+    .filter(u => {
+      if (!search.trim()) return true;
+      const q = search.toLowerCase();
+      return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (ROLE_LABELS[u.role]||u.role).toLowerCase().includes(q);
+    });
 
   return (
     <div>
@@ -1554,9 +1562,30 @@ function TeamPage({ users, setUsers, bugs, toast, currentUser, onCurrentUserUpda
           <h1>Team Members</h1>
           <p>{users.length} member{users.length!==1?'s':''} · {users.filter(u=>u.role==='admin').length} admin · {users.filter(u=>u.role==='project_manager').length} project manager · {users.filter(u=>u.role==='developer').length} developer · {users.filter(u=>u.role==='frontend_developer').length} frontend · {users.filter(u=>u.role==='backend_developer').length} backend · {users.filter(u=>u.role==='tester' || u.role==='qa').length} QA · {users.filter(u=>u.role==='viewer').length} viewer</p>
         </div>
-        {isAdmin && <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Member</button>}
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <div style={{position:'relative'}}>
+            <span style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',color:'var(--muted)',fontSize:14,pointerEvents:'none'}}>🔍</span>
+            <input
+              type="text"
+              placeholder="Search by name, email or role…"
+              value={search}
+              onChange={e=>setSearch(e.target.value)}
+              style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'7px 12px 7px 32px',color:'var(--text)',width:240,outline:'none',fontSize:13}}
+              onFocus={e=>e.target.style.borderColor='var(--primary)'}
+              onBlur={e=>e.target.style.borderColor='var(--border)'}
+            />
+            {search && <button onClick={()=>setSearch('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:'var(--muted)',cursor:'pointer',fontSize:14,lineHeight:1}}>✕</button>}
+          </div>
+          {isAdmin && <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Member</button>}
+        </div>
       </div>
 
+      {search && <div style={{fontSize:13,color:'var(--muted)',marginBottom:4}}>{sorted.length} result{sorted.length!==1?'s':''} for "<strong>{search}</strong>"</div>}
+      {sorted.length === 0 && (
+        <div style={{textAlign:'center',padding:'48px 0',color:'var(--muted)',fontSize:14}}>
+          No members match "<strong>{search}</strong>"
+        </div>
+      )}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:16}}>
         {sorted.map(u => {
           const assigned = bugs.filter(b => b.assigneeId === u.id);
