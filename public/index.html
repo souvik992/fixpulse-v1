@@ -6,6 +6,7 @@
   <title>FixPulse - Bug Tracker Plans</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="preload" as="image" href="/index-banner-hero.jpg" fetchpriority="high" />
   <style>
     :root {
       --bg: #f6f8fc;
@@ -172,6 +173,8 @@
     }
     .section {
       padding-top: 42px;
+      content-visibility: auto;
+      contain-intrinsic-size: 1px 800px;
     }
     .section-head {
       margin-bottom: 18px;
@@ -311,7 +314,7 @@
   <div class="shell">
     <header class="topbar">
       <a class="brand" href="/">
-        <img src="/fixpulse-logo.png" alt="FixPulse logo" />
+        <img src="/fixpulse-logo-small.png" alt="FixPulse logo" width="40" height="40" decoding="async" />
         <span>FixPulse</span>
       </a>
       <nav class="legal-nav">
@@ -326,7 +329,14 @@
     </header>
 
     <section class="hero">
-      <img src="/index-banner.png" alt="FixPulse banner" />
+      <img
+        src="/index-banner-hero.jpg"
+        alt="FixPulse banner"
+        width="1600"
+        height="900"
+        fetchpriority="high"
+        decoding="async"
+      />
       <div class="hero-content">
         <div class="hero-card">
           <h1>

@@ -1,0 +1,8 @@
+✅ PostgreSQL connected
+
+BugTracker      ->  http://localhost:3000
+Storage         ->  PostgreSQL
+Multi-tenant    ->  enabled
+JWT Auth        ->  enabled
+
+[sheet-sync] enabled for organization data sources every 3600s
