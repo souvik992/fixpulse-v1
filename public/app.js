@@ -1764,7 +1764,7 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
 }
 
 // ── TeamPage (multi-tenant, role-aware) ───────────────────────────────────────
-function TeamPage({ users, setUsers, bugs, setBugs, toast, currentUser, onCurrentUserUpdated, projects }) {
+function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentUser, onCurrentUserUpdated, projects }) {
   const isAdmin = currentUser?.role === 'admin';
   const [selectedMember, setSelectedMember] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -1873,6 +1873,13 @@ function TeamPage({ users, setUsers, bugs, setBugs, toast, currentUser, onCurren
 
   return (
     <div>
+      {bugsLoading && !selectedMember && (
+        <div className="empty-state">
+          <div className="icon">Loading...</div>
+          <h3>Loading team metrics</h3>
+          <p>Preparing member issue counts.</p>
+        </div>
+      )}
       {selectedMember && (
         <MemberDashboard
           member={selectedMember}
@@ -1884,7 +1891,7 @@ function TeamPage({ users, setUsers, bugs, setBugs, toast, currentUser, onCurren
           currentUser={currentUser}
         />
       )}
-      {!selectedMember && <>
+      {!selectedMember && !bugsLoading && <>
       <div className="page-header">
         <div>
           <h1>Team Members</h1>
@@ -2728,6 +2735,8 @@ function App() {
   const [projects, setProjects]     = useState([]);
   const [users, setUsers]           = useState([]);
   const [allBugs, setAllBugs]       = useState([]);
+  const [allBugsLoaded, setAllBugsLoaded] = useState(false);
+  const [allBugsLoading, setAllBugsLoading] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [showSidebarProjectCreate, setShowSidebarProjectCreate] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -2773,10 +2782,21 @@ function App() {
   useEffect(() => {
     if (!authUser) return;
     setProjectsLoading(true);
-    Promise.all([api.get('/api/projects'), api.get('/api/members'), api.get('/api/bugs')])
-      .then(([p, u, b]) => { setProjects(p); setUsers(u); setAllBugs(b); })
+    Promise.all([api.get('/api/projects'), api.get('/api/members')])
+      .then(([p, u]) => { setProjects(p); setUsers(u); })
       .finally(() => setProjectsLoading(false));
   }, [authUser]);
+
+  useEffect(() => {
+    if (!authUser || view !== 'team' || allBugsLoaded || allBugsLoading) return;
+    setAllBugsLoading(true);
+    api.get('/api/bugs')
+      .then(b => {
+        setAllBugs(Array.isArray(b) ? b : []);
+        setAllBugsLoaded(true);
+      })
+      .finally(() => setAllBugsLoading(false));
+  }, [authUser, view, allBugsLoaded, allBugsLoading]);
 
   // ── Presence: heartbeat + poll online users ──
   useEffect(() => {
@@ -2978,7 +2998,7 @@ function App() {
           {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onSelectProject={handleDashboardProjectSelect} currentUser={authUser} toast={toast} onSyncComplete={reloadData}/>}
           {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser} onSyncComplete={reloadData}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
-          {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} setBugs={setAllBugs} projects={projects} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
+          {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} bugsLoading={allBugsLoading} setBugs={next => { setAllBugsLoaded(true); setAllBugs(next); }} projects={projects} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
           {view==='roles'     && <RolesPage users={users} currentUser={authUser} toast={toast}/>}
           {view==='settings'  && <SettingsPage org={authOrg} setOrg={setAuthOrg} currentUser={authUser} toast={toast} users={users}/>}
         </div>

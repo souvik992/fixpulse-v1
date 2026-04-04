@@ -1034,7 +1034,7 @@
       }
     ));
   }
-  function TeamPage({ users, setUsers, bugs, setBugs, toast, currentUser, onCurrentUserUpdated, projects }) {
+  function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentUser, onCurrentUserUpdated, projects }) {
     const isAdmin = currentUser?.role === "admin";
     const [selectedMember, setSelectedMember] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
@@ -1135,7 +1135,7 @@
       return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (ROLE_LABELS[u.role] || u.role).toLowerCase().includes(q);
     });
     const reassignOptions = users.filter((u) => u.id !== reassignTarget?.id).map((u) => ({ value: u.id, label: `${u.name} (${ROLE_LABELS[u.role] || u.role})` }));
-    return /* @__PURE__ */ React.createElement("div", null, selectedMember && /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", null, bugsLoading && !selectedMember && /* @__PURE__ */ React.createElement("div", { className: "empty-state" }, /* @__PURE__ */ React.createElement("div", { className: "icon" }, "Loading..."), /* @__PURE__ */ React.createElement("h3", null, "Loading team metrics"), /* @__PURE__ */ React.createElement("p", null, "Preparing member issue counts.")), selectedMember && /* @__PURE__ */ React.createElement(
       MemberDashboard,
       {
         member: selectedMember,
@@ -1146,7 +1146,7 @@
         toast,
         currentUser
       }
-    ), !selectedMember && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "page-header" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", null, "Team Members"), /* @__PURE__ */ React.createElement("p", null, users.length, " member", users.length !== 1 ? "s" : "", " \xB7 ", users.filter((u) => u.role === "admin").length, " admin \xB7 ", users.filter((u) => u.role === "project_manager").length, " project manager \xB7 ", users.filter((u) => u.role === "developer").length, " developer \xB7 ", users.filter((u) => u.role === "frontend_developer").length, " frontend \xB7 ", users.filter((u) => u.role === "backend_developer").length, " backend \xB7 ", users.filter((u) => u.role === "tester" || u.role === "qa").length, " QA \xB7 ", users.filter((u) => u.role === "viewer").length, " viewer")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 14, pointerEvents: "none" } }, "\u{1F50D}"), /* @__PURE__ */ React.createElement(
+    ), !selectedMember && !bugsLoading && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "page-header" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", null, "Team Members"), /* @__PURE__ */ React.createElement("p", null, users.length, " member", users.length !== 1 ? "s" : "", " \xB7 ", users.filter((u) => u.role === "admin").length, " admin \xB7 ", users.filter((u) => u.role === "project_manager").length, " project manager \xB7 ", users.filter((u) => u.role === "developer").length, " developer \xB7 ", users.filter((u) => u.role === "frontend_developer").length, " frontend \xB7 ", users.filter((u) => u.role === "backend_developer").length, " backend \xB7 ", users.filter((u) => u.role === "tester" || u.role === "qa").length, " QA \xB7 ", users.filter((u) => u.role === "viewer").length, " viewer")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 14, pointerEvents: "none" } }, "\u{1F50D}"), /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "text",
@@ -1580,10 +1580,13 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
     const [authUser, setAuthUser] = useState(null);
     const [authOrg, setAuthOrg] = useState(null);
     const [authChecked, setAuthChecked] = useState(false);
+    const [loggingOut, setLoggingOut] = useState(false);
     const [view, setView] = useState("dashboard");
     const [projects, setProjects] = useState([]);
     const [users, setUsers] = useState([]);
     const [allBugs, setAllBugs] = useState([]);
+    const [allBugsLoaded, setAllBugsLoaded] = useState(false);
+    const [allBugsLoading, setAllBugsLoading] = useState(false);
     const [currentProjectId, setCurrentProjectId] = useState(null);
     const [showSidebarProjectCreate, setShowSidebarProjectCreate] = useState(false);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -1631,12 +1634,19 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
     useEffect(() => {
       if (!authUser) return;
       setProjectsLoading(true);
-      Promise.all([api.get("/api/projects"), api.get("/api/members"), api.get("/api/bugs")]).then(([p, u, b]) => {
+      Promise.all([api.get("/api/projects"), api.get("/api/members")]).then(([p, u]) => {
         setProjects(p);
         setUsers(u);
-        setAllBugs(b);
       }).finally(() => setProjectsLoading(false));
     }, [authUser]);
+    useEffect(() => {
+      if (!authUser || view !== "team" || allBugsLoaded || allBugsLoading) return;
+      setAllBugsLoading(true);
+      api.get("/api/bugs").then((b) => {
+        setAllBugs(Array.isArray(b) ? b : []);
+        setAllBugsLoaded(true);
+      }).finally(() => setAllBugsLoading(false));
+    }, [authUser, view, allBugsLoaded, allBugsLoading]);
     useEffect(() => {
       if (!authUser) return;
       const sendOfflineBeacon = () => {
@@ -1677,15 +1687,10 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
       document.title = "FixPulse - Bug Tracker";
     };
     const handleLogout = async () => {
+      setLoggingOut(true);
       await api.post("/api/auth/logout", {});
       Token.clear();
       sessionStorage.removeItem("bt_root_redirecting");
-      setAuthUser(null);
-      setAuthOrg(null);
-      setProjectsLoading(false);
-      setProjects([]);
-      setUsers([]);
-      setAllBugs([]);
       document.title = "FixPulse - Login";
       window.location.replace("/login");
     };
@@ -1723,7 +1728,7 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
       document.addEventListener("click", closeMenu);
       return () => document.removeEventListener("click", closeMenu);
     }, []);
-    if (!authChecked) return null;
+    if (!authChecked || loggingOut) return null;
     if (!authUser) return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(AuthPage, { onAuth: handleAuth }), /* @__PURE__ */ React.createElement(Toast, { toasts, dismiss: (id) => setToasts((ts) => ts.filter((t) => t.id !== id)) }));
     return /* @__PURE__ */ React.createElement("div", { className: "app" }, /* @__PURE__ */ React.createElement("aside", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sidebar-logo", style: { flexDirection: "column", alignItems: "flex-start", gap: 0, paddingBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, width: "100%" } }, /* @__PURE__ */ React.createElement(BrandLogo, { src: authOrg?.logo || BRAND_LOGO, size: 44, rounded: 12 }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, authOrg?.name || "FixPulse"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--muted)", marginTop: 1 } }, "Bug Tracker")))), /* @__PURE__ */ React.createElement("div", { className: "sidebar-section" }, /* @__PURE__ */ React.createElement("div", { className: "sidebar-label" }, "Main"), navItems.map((item) => /* @__PURE__ */ React.createElement("div", { key: item.id, className: `sidebar-item ${view === item.id ? "active" : ""}`, onClick: () => setView(item.id) }, /* @__PURE__ */ React.createElement("span", { className: "icon" }, item.icon), /* @__PURE__ */ React.createElement("span", { className: "label" }, item.label)))), /* @__PURE__ */ React.createElement("div", { className: "sidebar-section" }, /* @__PURE__ */ React.createElement("div", { className: "sidebar-label" }, "Projects"), projectsLoading ? /* @__PURE__ */ React.createElement("div", { style: { padding: "12px", color: "var(--muted)", fontSize: 13, display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("span", { className: "btn-spinner", style: { width: 16, height: 16, borderWidth: 2 } }), /* @__PURE__ */ React.createElement("span", null, "Loading projects\u2026")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { padding: "0 12px 10px" } }, /* @__PURE__ */ React.createElement(
       "input",
@@ -1746,7 +1751,10 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
     })(), /* @__PURE__ */ React.createElement("button", { className: "theme-toggle", onClick: toggleTheme, title: theme === "dark" ? "Switch to light mode" : "Switch to dark mode" }, theme === "dark" ? "\u2600\uFE0F" : "\u{1F319}"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, position: "relative" }, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { style: { textAlign: "right", display: "flex", flexDirection: "column" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, fontWeight: 500 } }, authUser.name), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "var(--muted)" } }, ROLE_LABELS[authUser.role] || authUser.role)), /* @__PURE__ */ React.createElement("button", { className: "btn-ghost", style: { padding: 0, border: "none", background: "transparent", display: "flex", alignItems: "center", gap: 8 }, onClick: () => setShowProfileMenu((v) => !v) }, /* @__PURE__ */ React.createElement("div", { style: { position: "relative", display: "inline-flex" } }, /* @__PURE__ */ React.createElement(Avatar, { user: authUser }), /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#22c55e", border: "2px solid var(--surface)", boxSizing: "border-box", display: "block" } })), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--muted)" } }, "\u25BE")), showProfileMenu && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 220, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", boxShadow: "var(--shadow)", padding: 8, zIndex: 50 } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 10px", borderBottom: "1px solid var(--border)", marginBottom: 6 } }, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, authUser.name), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--muted)" } }, ROLE_LABELS[authUser.role] || authUser.role)), /* @__PURE__ */ React.createElement("button", { className: "btn btn-ghost btn-sm", style: { width: "100%", justifyContent: "flex-start", marginBottom: 6 }, onClick: () => {
       setShowProfileMenu(false);
       setShowProfileSettings(true);
-    } }, "Profile Settings"), /* @__PURE__ */ React.createElement("button", { className: "btn btn-ghost btn-sm", style: { width: "100%", justifyContent: "flex-start" }, onClick: handleLogout }, "Log Out")))), /* @__PURE__ */ React.createElement("div", { className: "content" }, view === "dashboard" && /* @__PURE__ */ React.createElement(Dashboard, { projects, users, currentProject, onSelectProject: handleDashboardProjectSelect, currentUser: authUser, toast, onSyncComplete: reloadData }), view === "list" && /* @__PURE__ */ React.createElement(BugList, { projects, users, currentProject, toast, currentUser: authUser, onSyncComplete: reloadData }), view === "projects" && /* @__PURE__ */ React.createElement(ProjectsPage, { projects, setProjects, toast, onProjectCreated: handleProjectCreated }), view === "team" && /* @__PURE__ */ React.createElement(TeamPage, { users, setUsers, bugs: allBugs, setBugs: setAllBugs, projects, toast, currentUser: authUser, onCurrentUserUpdated: (user) => setAuthUser(user) }), view === "roles" && /* @__PURE__ */ React.createElement(RolesPage, { users, currentUser: authUser, toast }), view === "settings" && /* @__PURE__ */ React.createElement(SettingsPage, { org: authOrg, setOrg: setAuthOrg, currentUser: authUser, toast, users }))), showSidebarProjectCreate && /* @__PURE__ */ React.createElement(ProjectModal, { onClose: () => setShowSidebarProjectCreate(false), onCreate: async (form) => {
+    } }, "Profile Settings"), /* @__PURE__ */ React.createElement("button", { className: "btn btn-ghost btn-sm", style: { width: "100%", justifyContent: "flex-start" }, onClick: handleLogout }, "Log Out")))), /* @__PURE__ */ React.createElement("div", { className: "content" }, view === "dashboard" && /* @__PURE__ */ React.createElement(Dashboard, { projects, users, currentProject, onSelectProject: handleDashboardProjectSelect, currentUser: authUser, toast, onSyncComplete: reloadData }), view === "list" && /* @__PURE__ */ React.createElement(BugList, { projects, users, currentProject, toast, currentUser: authUser, onSyncComplete: reloadData }), view === "projects" && /* @__PURE__ */ React.createElement(ProjectsPage, { projects, setProjects, toast, onProjectCreated: handleProjectCreated }), view === "team" && /* @__PURE__ */ React.createElement(TeamPage, { users, setUsers, bugs: allBugs, bugsLoading: allBugsLoading, setBugs: (next) => {
+      setAllBugsLoaded(true);
+      setAllBugs(next);
+    }, projects, toast, currentUser: authUser, onCurrentUserUpdated: (user) => setAuthUser(user) }), view === "roles" && /* @__PURE__ */ React.createElement(RolesPage, { users, currentUser: authUser, toast }), view === "settings" && /* @__PURE__ */ React.createElement(SettingsPage, { org: authOrg, setOrg: setAuthOrg, currentUser: authUser, toast, users }))), showSidebarProjectCreate && /* @__PURE__ */ React.createElement(ProjectModal, { onClose: () => setShowSidebarProjectCreate(false), onCreate: async (form) => {
       const p = await api.post("/api/projects", form);
       setProjects((ps) => [...ps, p]);
       setShowSidebarProjectCreate(false);
