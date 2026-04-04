@@ -47,6 +47,9 @@ const formatIssueCreatedDate = bug => {
   if (!createdAt) return 'Unavailable';
   return formatDate(createdAt);
 };
+const sortBugsByCreatedDateDesc = bugs => [...(bugs || [])]
+  .filter(bug => Boolean(getIssueCreatedDate(bug)))
+  .sort((a, b) => new Date(getIssueCreatedDate(b)).getTime() - new Date(getIssueCreatedDate(a)).getTime());
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -1292,13 +1295,18 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
     exportReport,
   } = useProjectReportExport({ currentProject, projects, users, toast });
 
-  useEffect(() => {
-    const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats';
-    const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs';
-    api.get(statsUrl).then(setStats);
-    api.get(bugsUrl).then(setAllBugs);
+  const refreshDashboardData = useCallback(async () => {
+    const statsUrl = currentProject ? "/api/stats?projectId=" + currentProject.id : '/api/stats';
+    const bugsUrl = currentProject ? "/api/bugs?projectId=" + currentProject.id : '/api/bugs';
+    const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]);
+    setStats(nextStats);
+    setAllBugs(sortBugsByCreatedDateDesc(nextBugs));
     setPage(1);
   }, [currentProject]);
+
+  useEffect(() => {
+    refreshDashboardData();
+  }, [refreshDashboardData]);
 
   useEffect(() => {
     let active = true;
@@ -1326,21 +1334,26 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
     };
   }, [stats]);
 
-  if (!stats) return <div style={{color:'var(--muted)',padding:40,textAlign:'center'}}>Loading dashboard…</div>;
+  if (!stats) return <div style={{color:'var(--muted)',padding:40,textAlign:'center'}}>Loading dashboard...</div>;
   if (stats.error) {
     return (
       <div className="empty-state">
-        <div className="icon">🔒</div>
+        <div className="icon">??</div>
         <h3>Dashboard Unavailable</h3>
         <p>{stats.error}</p>
       </div>
     );
   }
 
+  const homepageBugs = sortBugsByCreatedDateDesc(allBugs);
+  const totalPages = Math.max(1, Math.ceil(homepageBugs.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedBugs = homepageBugs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <div>
       <div className="page-header">
-        <div><h1>Dashboard</h1><p>{currentProject ? currentProject.name : 'All Projects'} · Overview</p></div>
+        <div><h1>Dashboard</h1><p>{currentProject ? currentProject.name : 'All Projects'} ? Overview</p></div>
         <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
           <SearchableSelect
             value={currentProject?.id || ''}
@@ -1358,40 +1371,33 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
         ))}
       </div>
       <div className="charts-grid">
-        <div className="chart-card"><h3>Issues Created (Last 7 Days)</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart…</div>}<canvas ref={lineRef} style={{display:chartsReady?'block':'none'}} /></div></div>
-        <div className="chart-card"><h3>By Status</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart…</div>}<canvas ref={doughnutRef} style={{display:chartsReady?'block':'none'}} /></div></div>
-        <div className="chart-card"><h3>By Priority</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart…</div>}<canvas ref={barRef} style={{display:chartsReady?'block':'none'}} /></div></div>
+        <div className="chart-card"><h3>Issues Created (Last 7 Days)</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart...</div>}<canvas ref={lineRef} style={{display:chartsReady?'block':'none'}} /></div></div>
+        <div className="chart-card"><h3>By Status</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart...</div>}<canvas ref={doughnutRef} style={{display:chartsReady?'block':'none'}} /></div></div>
+        <div className="chart-card"><h3>By Priority</h3><div className="chart-wrap">{!chartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart...</div>}<canvas ref={barRef} style={{display:chartsReady?'block':'none'}} /></div></div>
       </div>
-      {(() => {
-        const totalPages = Math.max(1, Math.ceil(allBugs.length / pageSize));
-        const currentPage = Math.min(page, totalPages);
-        const paginatedBugs = allBugs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-        return (
-          <div className="table-card" style={{padding:20}}>
-            <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:16}}>
-              <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',margin:0}}>Issues</h3>
-              <SyncTimestamp toast={toast} onSyncComplete={onSyncComplete} />
-            </div>
-            {allBugs.length === 0
-              ? <div style={{color:'var(--muted)',fontSize:13,padding:'16px 0',textAlign:'center'}}>No issues found.</div>
-              : <>
-                  <IssueTable bugs={paginatedBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
-                  {totalPages > 1 && (
-                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'16px 0 0',flexWrap:'wrap'}}>
-                      <div style={{fontSize:12,color:'var(--muted)'}}>Showing {(currentPage-1)*pageSize+1}–{Math.min(currentPage*pageSize,allBugs.length)} of {allBugs.length}</div>
-                      <div style={{display:'flex',alignItems:'center',gap:8}}>
-                        <button className="btn btn-ghost btn-sm" disabled={currentPage===1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button>
-                        <span style={{fontSize:12,color:'var(--muted)'}}>Page {currentPage} of {totalPages}</span>
-                        <button className="btn btn-ghost btn-sm" disabled={currentPage===totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Next</button>
-                      </div>
-                    </div>
-                  )}
-                </>
-            }
-          </div>
-        );
-      })()}
-      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]); setStats(nextStats); setAllBugs(nextBugs); }} onDelete={async (id) => { setAllBugs(bs => bs.filter(b => b.id !== id)); setSelectedBug(null); const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]); setStats(nextStats); setAllBugs(nextBugs); }} />}
+      <div className="table-card" style={{padding:20}}>
+        <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:16}}>
+          <h3 style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',margin:0}}>Issues</h3>
+          <SyncTimestamp toast={toast} onSyncComplete={onSyncComplete} />
+        </div>
+        {homepageBugs.length === 0
+          ? <div style={{color:'var(--muted)',fontSize:13,padding:'16px 0',textAlign:'center'}}>No issues found.</div>
+          : <>
+              <IssueTable bugs={paginatedBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
+              {totalPages > 1 && (
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'16px 0 0',flexWrap:'wrap'}}>
+                  <div style={{fontSize:12,color:'var(--muted)'}}>Showing {(currentPage-1)*pageSize+1}?{Math.min(currentPage*pageSize,homepageBugs.length)} of {homepageBugs.length}</div>
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <button className="btn btn-ghost btn-sm" disabled={currentPage===1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button>
+                    <span style={{fontSize:12,color:'var(--muted)'}}>Page {currentPage} of {totalPages}</span>
+                    <button className="btn btn-ghost btn-sm" disabled={currentPage===totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Next</button>
+                  </div>
+                </div>
+              )}
+            </>
+        }
+      </div>
+      {selectedBug && <BugDetail bugId={selectedBug} initialBug={homepageBugs.find(b=>b.id===selectedBug)||null} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={refreshDashboardData} onDelete={async (id) => { setAllBugs(bs => bs.filter(b => b.id !== id)); setSelectedBug(null); await refreshDashboardData(); }} />}
       <ExportReportFiltersModal visible={showExportFilters} onClose={closeExportModal} currentProject={currentProject} projects={projects} users={users} exportFilters={exportFilters} setExportFilter={setExportFilter} onReset={resetExportFilters} onExport={exportReport} />
     </div>
   );
@@ -1570,17 +1576,19 @@ function ProjectModal({ onClose, onCreate }) {
 
 function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
   const [showCreate,setShowCreate]=useState(false);
+  const [projectToDelete,setProjectToDelete]=useState(null);
   const [form,setForm]=useState({name:'',key:'',description:'',color:'#6366f1'});
   const colors=['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
   const create=async e=>{e.preventDefault();if(!form.name||!form.key)return;const p=await api.post('/api/projects',form);setProjects(ps=>[...ps,p]);setForm({name:'',key:'',description:'',color:'#6366f1'});setShowCreate(false);onProjectCreated?.(p);toast('Project created','success');};
-  const del=async id=>{await api.delete(`/api/projects/${id}`);setProjects(ps=>ps.filter(p=>p.id!==id));toast('Project deleted','info');};
+  const del=async project=>{await api.delete(`/api/projects/${project.id}`);setProjects(ps=>ps.filter(p=>p.id!==project.id));setProjectToDelete(null);toast('Project deleted','info');};
   return (
     <div>
       <div className="page-header"><div><h1>Projects</h1><p>{projects.length} project{projects.length!==1?'s':''}</p></div><button className="btn btn-primary" onClick={()=>setShowCreate(true)}>+ New Project</button></div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:16}}>
-        {projects.map(p=>(<div key={p.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,borderTop:`3px solid ${p.color}`}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:36,height:36,borderRadius:8,background:p.color,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,color:'#fff',fontSize:14}}>{p.key}</div><div><div style={{fontWeight:600}}>{p.name}</div><div style={{fontSize:11,color:'var(--muted)'}}>{p.key}</div></div></div><button className="btn btn-danger btn-sm" onClick={()=>del(p.id)}>Delete</button></div><div style={{fontSize:13,color:'var(--muted)',lineHeight:1.5}}>{p.description||'No description.'}</div><div style={{fontSize:11,color:'var(--muted)',marginTop:10}}>Created {new Date(p.createdAt).toLocaleDateString()}</div></div>))}
+        {projects.map(p=>(<div key={p.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,borderTop:`3px solid ${p.color}`}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:36,height:36,borderRadius:8,background:p.color,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,color:'#fff',fontSize:14}}>{p.key}</div><div><div style={{fontWeight:600}}>{p.name}</div><div style={{fontSize:11,color:'var(--muted)'}}>{p.key}</div></div></div><button className="btn btn-danger btn-sm" onClick={()=>setProjectToDelete(p)}>Delete</button></div><div style={{fontSize:13,color:'var(--muted)',lineHeight:1.5}}>{p.description||'No description.'}</div><div style={{fontSize:11,color:'var(--muted)',marginTop:10}}>Created {new Date(p.createdAt).toLocaleDateString()}</div></div>))}
       </div>
       {showCreate&&(<Modal onClose={()=>setShowCreate(false)}><div className="modal-header"><h2 className="modal-title">New Project</h2><button className="btn-icon" onClick={()=>setShowCreate(false)}>✕</button></div><form onSubmit={create}><div className="modal-body"><div className="form-group"><label className="form-label">Project Name *</label><input className="form-input" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value,key:e.target.value.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,4)}))} required/></div><div className="form-group"><label className="form-label">Project Key *</label><input className="form-input" value={form.key} onChange={e=>setForm(f=>({...f,key:e.target.value.toUpperCase()}))} required maxLength={6}/></div><div className="form-group"><label className="form-label">Description</label><textarea className="form-textarea" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="form-group"><label className="form-label">Colour</label><div className="color-swatches">{colors.map(c=><div key={c} className={`swatch ${form.color===c?'selected':''}`} style={{background:c}} onClick={()=>setForm(f=>({...f,color:c}))}/>)}</div></div></div><div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={()=>setShowCreate(false)}>Cancel</button><button type="submit" className="btn btn-primary">Create Project</button></div></form></Modal>)}
+      {projectToDelete&&(<Modal onClose={()=>setProjectToDelete(null)}><div className="modal-header"><h2 className="modal-title">Delete Project</h2><button className="btn-icon" onClick={()=>setProjectToDelete(null)}>✕</button></div><div className="modal-body"><p style={{fontSize:14,lineHeight:1.6,color:'var(--muted)'}}>Are you sure you want to delete <strong style={{color:'var(--text)'}}>{projectToDelete.name}</strong>? This will remove the project and its issues.</p></div><div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={()=>setProjectToDelete(null)}>Cancel</button><button type="button" className="btn btn-danger" onClick={()=>del(projectToDelete)}>Delete Project</button></div></Modal>)}
     </div>
   );
 }
@@ -1874,10 +1882,9 @@ function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentU
   return (
     <div>
       {bugsLoading && !selectedMember && (
-        <div className="empty-state">
-          <div className="icon">Loading...</div>
-          <h3>Loading team metrics</h3>
-          <p>Preparing member issue counts.</p>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,padding:'10px 12px',border:'1px solid var(--border)',borderRadius:12,background:'var(--surface)'}}>
+          <span className="spinner" style={{width:14,height:14}} />
+          <span style={{fontSize:13,color:'var(--muted)'}}>Loading team metrics...</span>
         </div>
       )}
       {selectedMember && (
@@ -1891,7 +1898,7 @@ function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentU
           currentUser={currentUser}
         />
       )}
-      {!selectedMember && !bugsLoading && <>
+      {!selectedMember && <>
       <div className="page-header">
         <div>
           <h1>Team Members</h1>
