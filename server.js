@@ -1,6 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -13,45 +16,46 @@ const { PERMISSIONS } = require('./rbac/permissions');
 const { checkPermission, assignSystemRole, getUserPermissions, LEGACY_TO_RBAC } = require('./rbac/middleware');
 const { startGoogleSheetSync, getGoogleSheetSyncStatus, triggerGoogleSheetSync } = require('./services/googleSheetSync');
 const { addProjectTabToSheet, exportOrgToXlsxBuffer, pushToAppsScript, pushNewTabToAppsScript } = require('./services/sheetExport');
-
-// ── In-memory presence store ──────────────────────────────────────────────────
-// Map<orgId, Map<userId, { lastSeen: Date, user: { id, name, avatar, color } }>>
-const presenceStore = new Map();
-const PRESENCE_TIMEOUT_MS = 45_000; // 45 s without heartbeat = offline
-
-function getOrgPresence(orgId) {
-  if (!presenceStore.has(orgId)) presenceStore.set(orgId, new Map());
-  return presenceStore.get(orgId);
-}
-
-function markPresence(orgId, userId, userData) {
-  const org = getOrgPresence(orgId);
-  org.set(userId, { lastSeen: Date.now(), user: userData });
-}
-
-function removePresence(orgId, userId) {
-  presenceStore.get(orgId)?.delete(userId);
-}
-
-function getOnlineUsers(orgId) {
-  const org = getOrgPresence(orgId);
-  const cutoff = Date.now() - PRESENCE_TIMEOUT_MS;
-  const online = [];
-  for (const [uid, entry] of org.entries()) {
-    if (entry.lastSeen >= cutoff) online.push(entry.user);
-    else org.delete(uid);
-  }
-  return online;
-}
+const redisClient = require('./db/redis');
+const cache       = require('./db/cache');
+const presence    = require('./services/presence');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'bugtracker_dev_secret';
 const JWT_EXPIRES = process.env.JWT_EXPIRES_IN || '7d';
 
-app.use(cors());
-app.use(express.json({ limit: '100mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+if (JWT_SECRET === 'bugtracker_dev_secret') {
+  console.warn('⚠️  WARNING: JWT_SECRET is using the insecure default. Set JWT_SECRET in your .env file before deploying to production.');
+}
+
+// Security headers
+app.use(helmet({ contentSecurityPolicy: false })); // CSP off — app uses inline Babel/React from CDN
+
+// CORS — restrict to configured origin in production
+const CORS_ORIGIN = process.env.CORS_ORIGIN;
+if (!CORS_ORIGIN && process.env.NODE_ENV === 'production') {
+  console.warn('⚠️  WARNING: CORS_ORIGIN not set. Allowing all origins in production is insecure.');
+}
+app.use(cors(CORS_ORIGIN ? { origin: CORS_ORIGIN.split(',') } : {}));
+
+app.use(compression());
+// 25 MB covers multiple image attachments as base64 data URLs; for large file uploads consider object storage
+app.use(express.json({ limit: '25mb' }));
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h', etag: true }));
+
+// Health check — no auth, used by load balancers and uptime monitors
+app.get('/health', (_req, res) => res.json({ ok: true, uptime: Math.floor(process.uptime()) }));
+
+// Rate limiters
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+
+// Rate limit expensive export/push endpoints
+const exportLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
+app.use('/api/sheet-export', exportLimiter);
+app.use('/api/sheet-push', exportLimiter);
 
 function hasTokenMarkerCookie(req) {
   const cookieHeader = req.headers.cookie || '';
@@ -133,6 +137,53 @@ function extractGoogleSheetId(value) {
   if (match) return match[1];
   if (/^[a-zA-Z0-9-_]{20,}$/.test(text)) return text;
   return '';
+}
+
+function getMetadataLineValue(description, label) {
+  const prefix = `${label}:`;
+  return String(description || '')
+    .split('\n')
+    .find((line) => line.startsWith(prefix))
+    ?.slice(prefix.length)
+    .trim() || '';
+}
+
+function isPseudoSheetIssueRow(bug) {
+  const description = String(bug?.description || '');
+  if (!description.includes('Source Tab:')) return false;
+  const title = String(bug?.title || '').trim();
+  if (!title) return true;
+
+  const hasStrongSignal = [
+    'Raised By:',
+    'Issue Type:',
+    'Assignee(s):',
+    'Status (Original):',
+    'Module:',
+    'Feature:',
+    'Developer Comments:',
+    'QA Comments:',
+    'Steps To Reproduce:',
+    'Reference',
+  ].some((marker) => description.includes(marker));
+  if (hasStrongSignal) return false;
+
+  const sourceTab = getMetadataLineValue(description, 'Source Tab');
+  const application = getMetadataLineValue(description, 'Application');
+  const normalizedTitle = title.replace(/\s+/g, ' ').trim();
+  const normalizedSourceTab = sourceTab.replace(/\s+/g, ' ').trim();
+  const normalizedApplication = application.replace(/\s+/g, ' ').trim();
+  const words = normalizedTitle.split(' ').filter(Boolean);
+  const isNumericOnly = /^\d+$/.test(normalizedTitle);
+  const isGenericHeading = new Set(['ISSUES', 'ISSUE', 'WEB POS', 'M- RMS APP']).has(normalizedTitle.toUpperCase());
+  const isAllCapsShort = /^[A-Z0-9&'\/\- ]+$/.test(normalizedTitle) && words.length <= 5;
+  const applicationLooksLikeSection = /^[A-Z0-9&'\/\- ]+$/.test(normalizedApplication) && normalizedApplication.split(' ').filter(Boolean).length <= 5;
+  const matchesSheetLabel =
+    normalizedTitle.toLowerCase() === normalizedSourceTab.toLowerCase() ||
+    (applicationLooksLikeSection && normalizedTitle.toLowerCase() === normalizedApplication.toLowerCase());
+  const isTitleCaseShort = words.length <= 3 && words.every((word) => /^[A-Z][A-Za-z'’-]*$/.test(word));
+
+  return isNumericOnly || isGenericHeading || matchesSheetLabel || isAllCapsShort || isTitleCaseShort;
 }
 
 function normalizeOrgDataSource(payload = {}, existing = {}) {
@@ -809,10 +860,16 @@ app.post('/api/billing/verify-payment', auth, async (req, res) => {
 
 app.get('/api/members', auth, async (req, res) => {
   try {
+    const cacheKey = `members:${req.user.orgId}`;
+    const cached = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const { rows } = await db.query('SELECT * FROM users WHERE org_id=$1 ORDER BY created_at ASC', [
       req.user.orgId,
     ]);
-    res.json(camels(rows).map(strip));
+    const result = camels(rows).map(strip);
+    await cache.set(cacheKey, result, 60); // 60s TTL
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -854,6 +911,7 @@ app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async 
     const rbacRole = LEGACY_TO_RBAC[role];
     if (rbacRole) await assignSystemRole(rows[0].id, rbacRole, req.user.orgId);
 
+    await cache.del(`members:${req.user.orgId}`);
     res.status(201).json({ ...strip(camel(rows[0])), tempPassword });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -893,6 +951,7 @@ app.put('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), asy
       }
     }
 
+    await cache.del(`members:${req.user.orgId}`);
     res.json(strip(camel(rows[0])));
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -952,6 +1011,7 @@ app.delete('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), 
     }
 
     await db.query('DELETE FROM users WHERE id=$1 AND org_id=$2', [req.params.id, req.user.orgId]);
+    await cache.del(`members:${req.user.orgId}`);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1007,7 +1067,7 @@ app.post('/api/projects', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), asy
         const url = r[0]?.apps_script_url;
         console.log('[sheet] apps_script_url for org:', url || '(none)');
         if (url) pushNewTabToAppsScript(url, name)
-          .then(res => console.log('[sheet] pushNewTab response:', JSON.stringify(res)))
+          .then(r => console.log('[sheet] pushNewTab response:', JSON.stringify(r)))
           .catch(e => console.error('[sheet] pushNewTab error:', e.message));
       })
       .catch(e => console.error('[sheet] org query error:', e.message));
@@ -1029,7 +1089,7 @@ app.delete('/api/projects/:id', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT
 
 app.get('/api/bugs', auth, checkPermission(PERMISSIONS.VIEW_ISSUE), async (req, res) => {
   try {
-    const { projectId, status, priority, type, assigneeId, search } = req.query;
+    const { projectId, status, priority, type, assigneeId, search, page, pageSize } = req.query;
     const conditions = ['org_id=$1'];
     const values = [req.user.orgId];
     let index = 2;
@@ -1059,12 +1119,38 @@ app.get('/api/bugs', auth, checkPermission(PERMISSIONS.VIEW_ISSUE), async (req, 
       values.push(`%${search}%`);
     }
 
-    const { rows } = await db.query(
-      `SELECT * FROM bugs WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`,
+    const whereClause = conditions.join(' AND ');
+    const hasPagination = page !== undefined || pageSize !== undefined;
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safePageSize = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 20));
+
+    if (!hasPagination) {
+      const { rows } = await db.query(
+        `SELECT * FROM bugs WHERE ${whereClause} ORDER BY created_at DESC`,
+        values
+      );
+      return res.json(camels(rows).filter((bug) => !isPseudoSheetIssueRow(bug)));
+    }
+
+    const offset = (safePage - 1) * safePageSize;
+    const countQuery = db.query(
+      `SELECT COUNT(*)::int AS total FROM bugs WHERE ${whereClause}`,
       values
     );
+    const pagedQuery = db.query(
+      `SELECT * FROM bugs WHERE ${whereClause} ORDER BY created_at DESC LIMIT $${index++} OFFSET $${index++}`,
+      [...values, safePageSize, offset]
+    );
+    const [{ rows: countRows }, { rows }] = await Promise.all([countQuery, pagedQuery]);
+    const total = countRows[0]?.total || 0;
 
-    res.json(camels(rows));
+    res.json({
+      items: camels(rows).filter((bug) => !isPseudoSheetIssueRow(bug)),
+      total,
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1161,6 +1247,8 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
 
     bug.comments = [];
     bug.activity = [{ type: 'created', note: 'Issue created' }];
+    // Invalidate stats cache for this org (project-level and all-projects)
+    cache.del(`stats:${req.user.orgId}:all`, `stats:${req.user.orgId}:${projectId}`);
     res.status(201).json(bug);
 
     // Send email notification to assignee (non-blocking)
@@ -1247,6 +1335,7 @@ app.put('/api/bugs/:id', auth, async (req, res) => {
     bug.comments = camels(comments.rows);
     bug.activity = camels(activity.rows);
 
+    cache.del(`stats:${req.user.orgId}:all`, `stats:${req.user.orgId}:${bug.projectId}`);
     res.json(bug);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1261,6 +1350,7 @@ app.delete('/api/bugs/:id', auth, checkPermission(PERMISSIONS.DELETE_ISSUE, {
 }), async (req, res) => {
   try {
     await db.query('DELETE FROM bugs WHERE id=$1 AND org_id=$2', [req.params.id, req.user.orgId]);
+    cache.del(`stats:${req.user.orgId}:all`);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1301,6 +1391,10 @@ app.get('/api/stats', auth, checkPermission(PERMISSIONS.VIEW_REPORTS), async (re
     if (!perms.has(PERMISSIONS.VIEW_REPORTS)) {
       return denyMissingPermission(res, PERMISSIONS.VIEW_REPORTS);
     }
+
+    const cacheKey = `stats:${req.user.orgId}:${projectId || 'all'}`;
+    const cached   = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const filters = ['org_id = $1'];
     const values = [req.user.orgId];
@@ -1349,7 +1443,7 @@ app.get('/api/stats', auth, checkPermission(PERMISSIONS.VIEW_REPORTS), async (re
       if (row.type in byType) byType[row.type] = row.cnt;
     });
 
-    res.json({
+    const result = {
       total: totals.rows[0].total,
       openCount: totals.rows[0].open_count,
       doneCount: totals.rows[0].done_count,
@@ -1357,7 +1451,9 @@ app.get('/api/stats', auth, checkPermission(PERMISSIONS.VIEW_REPORTS), async (re
       byPriority,
       byType,
       daily: daily.rows,
-    });
+    };
+    await cache.set(cacheKey, result, 30); // 30s TTL — stats are near-real-time
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1589,7 +1685,7 @@ app.get('/api/rbac/users/:userId/permissions', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Presence ────────────────────────────────────────────────────────────────
+// ── Presence (Redis-backed, in-memory fallback) ──────────────────────────────
 // POST /api/presence/heartbeat — client calls every 30 s to stay "online"
 app.post('/api/presence/heartbeat', auth, async (req, res) => {
   try {
@@ -1599,26 +1695,28 @@ app.post('/api/presence/heartbeat', auth, async (req, res) => {
     );
     if (!rows[0]) return res.sendStatus(204);
     const { id, name, avatar, color } = rows[0];
-    markPresence(req.user.orgId, id, { id, name, avatar, color });
+    await presence.markPresence(req.user.orgId, id, { id, name, avatar, color });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // POST /api/presence/offline — called via sendBeacon on tab close
 // Token comes in the JSON body because sendBeacon cannot set auth headers
-app.post('/api/presence/offline', (req, res) => {
+app.post('/api/presence/offline', async (req, res) => {
   try {
     const token = req.body?.token;
     if (!token) return res.sendStatus(204);
     const payload = jwt.verify(token, JWT_SECRET);
-    removePresence(payload.orgId, payload.id);
+    await presence.removePresence(payload.orgId, payload.id);
   } catch { /* invalid token — ignore */ }
   res.sendStatus(204);
 });
 
 // GET /api/presence — returns online users in same org
-app.get('/api/presence', auth, (req, res) => {
-  res.json(getOnlineUsers(req.user.orgId));
+app.get('/api/presence', auth, async (req, res) => {
+  try {
+    res.json(await presence.getOnlineUsers(req.user.orgId));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/sheet-sync/status', auth, async (req, res) => {
@@ -1687,18 +1785,52 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Global error handler — catches any unhandled errors thrown by route handlers
+app.use((err, _req, res, _next) => {
+  console.error('[unhandled]', err.message);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 (async () => {
   try {
+    await redisClient.connect(); // non-fatal — falls back to in-process if unavailable
     await db.connect();
     await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS apps_script_url TEXT`);
     await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS sheet_pushed_at TIMESTAMPTZ`);
-    app.listen(PORT, () => {
+    // Indexes for high-frequency queries
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_org_project ON bugs(org_id, project_id)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_org_id ON bugs(org_id)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_assignee ON bugs(assignee_id) WHERE assignee_id IS NOT NULL`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_status ON bugs(org_id, status)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_created_at ON bugs(created_at DESC)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_sheet_pushed ON bugs(sheet_pushed_at) WHERE sheet_pushed_at IS NULL`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_activity_bug_id ON activity(bug_id)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_comments_bug_id ON comments(bug_id)`);
+    const server = app.listen(PORT, () => {
       console.log(`\nBugTracker      ->  http://localhost:${PORT}`);
       console.log('Storage         ->  PostgreSQL');
       console.log('Multi-tenant    ->  enabled');
       console.log('JWT Auth        ->  enabled\n');
       startGoogleSheetSync();
     });
+
+    // Keep-alive tuning for high-concurrency (Node default is 5s which is too short)
+    server.keepAliveTimeout = 65_000;
+    server.headersTimeout   = 70_000;
+
+    // Graceful shutdown — finish in-flight requests before exiting
+    function shutdown(signal) {
+      console.log(`\n[server] ${signal} received — shutting down gracefully`);
+      server.close(() => {
+        console.log('[server] HTTP server closed');
+        process.exit(0);
+      });
+      // Force exit after 15s if requests don't drain
+      setTimeout(() => { console.error('[server] Forced exit after timeout'); process.exit(1); }, 15_000).unref();
+    }
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT',  () => shutdown('SIGINT'));
+
   } catch (error) {
     console.error(error.message);
     process.exit(1);

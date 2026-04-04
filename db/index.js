@@ -5,7 +5,7 @@ let connected = false;
 
 async function connect() {
   // Neon / hosted: single DATABASE_URL takes priority
-  const config = process.env.DATABASE_URL
+  const base = process.env.DATABASE_URL
     ? { connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }
     : {
         host:     process.env.DB_HOST     || 'localhost',
@@ -13,8 +13,14 @@ async function connect() {
         database: process.env.DB_NAME     || 'bugtracker',
         user:     process.env.DB_USER     || 'bugtracker',
         password: process.env.DB_PASSWORD || 'bugtracker_secret',
-        connectionTimeoutMillis: 3000,
       };
+
+  const config = {
+    ...base,
+    max: 20,                       // max concurrent connections
+    idleTimeoutMillis: 30_000,     // release idle connections after 30s
+    connectionTimeoutMillis: 5_000,// fail fast if pool exhausted
+  };
 
   pool = new Pool(config);
   pool.on('error', (err) => {

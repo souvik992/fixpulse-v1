@@ -1,7 +1,9 @@
 'use strict';
 
-const https = require('https');
-const db = require('../db');
+const https        = require('https');
+const path         = require('path');
+const { Worker }   = require('worker_threads');
+const db           = require('../db');
 
 let xlsxLib = null;
 function getXlsx() {
@@ -80,14 +82,15 @@ async function addProjectTabToSheet(orgId, projectName) {
 
 /**
  * Build a multi-tab XLSX buffer with all (or one) project's issues.
- * Each project becomes a sheet tab; rows follow SHEET_HEADERS.
+ *
+ * Data is fetched on the main thread (I/O bound), then passed to a
+ * dedicated worker_thread for the CPU-intensive XLSX build so the
+ * event loop is never blocked during workbook generation.
  */
 async function exportOrgToXlsxBuffer(orgId, projectId = null) {
-  const XLSX = getXlsx();
-
-  const projectQuery = projectId
-    ? 'SELECT * FROM projects WHERE org_id=$1 AND id=$2 ORDER BY name ASC'
-    : 'SELECT * FROM projects WHERE org_id=$1 ORDER BY name ASC';
+  const projectQuery  = projectId
+    ? 'SELECT id, name FROM projects WHERE org_id=$1 AND id=$2 ORDER BY name ASC'
+    : 'SELECT id, name FROM projects WHERE org_id=$1 ORDER BY name ASC';
   const projectParams = projectId ? [orgId, projectId] : [orgId];
 
   const [{ rows: projects }, { rows: users }] = await Promise.all([
@@ -95,52 +98,44 @@ async function exportOrgToXlsxBuffer(orgId, projectId = null) {
     db.query('SELECT id, name FROM users WHERE org_id=$1', [orgId]),
   ]);
 
-  const userMap = new Map(users.map(u => [String(u.id), u.name]));
-  const workbook = XLSX.utils.book_new();
+  // Plain object — safer to transfer to a worker than a Map
+  const userMap = {};
+  users.forEach(u => { userMap[String(u.id)] = u.name; });
 
-  for (const project of projects) {
-    const { rows: bugs } = await db.query(
-      'SELECT * FROM bugs WHERE org_id=$1 AND project_id=$2 ORDER BY created_at ASC',
-      [orgId, project.id]
+  // Fetch bugs per project in parallel batches (avoids pool exhaustion on large orgs)
+  const BATCH = 5;
+  const projectsData = [];
+  for (let i = 0; i < projects.length; i += BATCH) {
+    const slice = projects.slice(i, i + BATCH);
+    const results = await Promise.all(
+      slice.map(p =>
+        db.query(
+          // Select only columns needed — skips large attachment blobs
+          `SELECT id, title, description, status, priority, type,
+                  assignee_id, reporter_id, created_at
+           FROM bugs WHERE org_id=$1 AND project_id=$2 ORDER BY created_at ASC`,
+          [orgId, p.id]
+        ).then(({ rows }) => ({ projectName: safeName(p.name), bugs: rows }))
+      )
     );
+    projectsData.push(...results);
+  }
 
-    const rows = [SHEET_HEADERS];
-    bugs.forEach((bug, idx) => {
-      rows.push([
-        idx + 1,
-        bug.title || '',
-        bug.status || '',
-        bug.priority || '',
-        userMap.get(String(bug.assignee_id)) || '',
-        bug.type || '',
-        getMetaValue(bug.description, 'Module'),
-        getMetaValue(bug.description, 'Feature'),
-        userMap.get(String(bug.reporter_id)) || getMetaValue(bug.description, 'Raised By'),
-        bug.created_at ? new Date(bug.created_at).toLocaleDateString('en-GB') : '',
-        getMetaValue(bug.description, 'Developer Comments'),
-        getMetaValue(bug.description, 'QA Comments'),
-        getMetaValue(bug.description, 'Sprint'),
-      ]);
+  // Hand off to worker thread — XLSX.write is synchronous and CPU-heavy
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      path.join(__dirname, '../workers/xlsxBuild.js'),
+      { workerData: { projects: projectsData, userMap, headers: SHEET_HEADERS } }
+    );
+    worker.once('message', (msg) => {
+      if (msg.ok) resolve(Buffer.from(msg.buffer));
+      else reject(new Error(msg.error));
     });
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-
-    // Set column widths
-    ws['!cols'] = [
-      { wch: 6 }, { wch: 60 }, { wch: 14 }, { wch: 12 },
-      { wch: 20 }, { wch: 14 }, { wch: 20 }, { wch: 20 },
-      { wch: 20 }, { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 14 },
-    ];
-
-    XLSX.utils.book_append_sheet(workbook, ws, safeName(project.name));
-  }
-
-  if (workbook.SheetNames.length === 0) {
-    const ws = XLSX.utils.aoa_to_sheet([SHEET_HEADERS]);
-    XLSX.utils.book_append_sheet(workbook, ws, 'Issues');
-  }
-
-  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    worker.once('error', reject);
+    worker.once('exit', (code) => {
+      if (code !== 0) reject(new Error(`XLSX worker exited with code ${code}`));
+    });
+  });
 }
 
 // ── Apps Script push ─────────────────────────────────────────────────────────

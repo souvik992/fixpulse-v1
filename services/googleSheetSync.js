@@ -377,7 +377,18 @@ function buildIssueRecord(sheetName, rowNumber, headerMap, row) {
   const rawValues = row.map(cleanValue).filter(Boolean);
   if (rawValues.length === 0) return null;
   const title = cleanValue(raw.titleSource) || cleanValue(raw.feature) || cleanValue(raw.module) || rawValues[0];
-  if (!title || title === 'PENDING ISSUES / IMPLEMENTATIONS') return null;
+  const normalizedTitle = cleanValue(title).replace(/\s+/g, ' ').trim();
+  const words = normalizedTitle.split(' ').filter(Boolean);
+  const hasStrongSignal = Boolean(raw.titleSource || raw.issueType || raw.statusRaw || raw.raisedBy || raw.assigneeRaw || raw.module || raw.feature || raw.devComments || raw.qaComments || raw.steps || raw.reference);
+  const isNumericOnly = /^\d+$/.test(normalizedTitle);
+  const isGenericHeading = new Set(['ISSUES', 'ISSUE', 'WEB POS']).has(normalizedTitle.toUpperCase());
+  const isAllCapsShort = /^[A-Z0-9&'\/\- ]+$/.test(normalizedTitle) && words.length <= 5;
+  const normalizedApplication = cleanValue(raw.application).replace(/\s+/g, ' ').trim();
+  const applicationLooksLikeSection = /^[A-Z0-9&'\/\- ]+$/.test(normalizedApplication) && normalizedApplication.split(' ').filter(Boolean).length <= 5;
+  const matchesSheetLabel = normalizedTitle.toLowerCase() === cleanValue(sheetName).toLowerCase() || (applicationLooksLikeSection && normalizedTitle.toLowerCase() === normalizedApplication.toLowerCase());
+  const isTitleCaseShort = words.length <= 3 && words.every((word) => /^[A-Z][A-Za-z'’-]*$/.test(word));
+  if (!normalizedTitle || normalizedTitle === 'PENDING ISSUES / IMPLEMENTATIONS') return null;
+  if (!hasStrongSignal && (isNumericOnly || isGenericHeading || matchesSheetLabel || isAllCapsShort || isTitleCaseShort)) return null;
   const metadata = [
     ['Source Tab', sheetName],
     ['Source Row', String(rowNumber)],

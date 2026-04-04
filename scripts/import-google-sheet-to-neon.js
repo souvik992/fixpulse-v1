@@ -564,6 +564,19 @@ function buildIssueRecord(sheetName, headerMap, row) {
     .filter((value, index, array) => array.indexOf(value) === index)
     .slice(0, 8);
 
+  const normalizedTitle = cleanValue(title).replace(/\s+/g, ' ').trim();
+  const words = normalizedTitle.split(' ').filter(Boolean);
+  const hasStrongSignal = Boolean(raw.titleSource || raw.issueType || raw.statusRaw || raw.raisedBy || raw.assigneeRaw || raw.module || raw.feature || raw.devComments || raw.qaComments || raw.steps || raw.reference);
+  const isNumericOnly = /^\d+$/.test(normalizedTitle);
+  const isGenericHeading = new Set(['ISSUES', 'ISSUE', 'WEB POS']).has(normalizedTitle.toUpperCase());
+  const isAllCapsShort = /^[A-Z0-9&'\/\- ]+$/.test(normalizedTitle) && words.length <= 5;
+  const normalizedApplication = cleanValue(raw.application).replace(/\s+/g, ' ').trim();
+  const applicationLooksLikeSection = /^[A-Z0-9&'\/\- ]+$/.test(normalizedApplication) && normalizedApplication.split(' ').filter(Boolean).length <= 5;
+  const matchesSheetLabel = normalizedTitle.toLowerCase() === cleanValue(sheet.name).toLowerCase() || (applicationLooksLikeSection && normalizedTitle.toLowerCase() === normalizedApplication.toLowerCase());
+  const isTitleCaseShort = words.length <= 3 && words.every((word) => /^[A-Z][A-Za-z'’-]*$/.test(word));
+  if (!normalizedTitle || normalizedTitle === 'PENDING ISSUES / IMPLEMENTATIONS') return null;
+  if (!hasStrongSignal && (isNumericOnly || isGenericHeading || matchesSheetLabel || isAllCapsShort || isTitleCaseShort)) return null;
+
   return {
     title: title.length > 500 ? title.slice(0, 497) + '...' : title,
     description,
