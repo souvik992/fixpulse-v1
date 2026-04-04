@@ -2987,8 +2987,8 @@ function App() {
                   <div style={{fontWeight:600,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{authUser.name}</div>
                   <div style={{fontSize:11,color:'var(--muted)'}}>{ROLE_LABELS[authUser.role]||authUser.role}</div>
                 </div>
-                <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'flex-start',marginBottom:6}} onClick={()=>{setShowProfileMenu(false);setShowProfileSettings(true);}}>Profile Settings</button>
-                <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'flex-start'}} onClick={handleLogout}>Log Out</button>
+                <button style={{width:'100%',justifyContent:'flex-start',marginBottom:2,padding:'8px 10px',border:'none',background:'transparent',color:'var(--text)',fontSize:13,fontWeight:500,textAlign:'left',borderRadius:8,cursor:'pointer'}} onMouseEnter={e=>e.currentTarget.style.background='var(--surface2)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'} onClick={()=>{setShowProfileMenu(false);setShowProfileSettings(true);}}>Profile Settings</button>
+                <button style={{width:'100%',justifyContent:'flex-start',padding:'8px 10px',border:'none',background:'transparent',color:'var(--text)',fontSize:13,fontWeight:500,textAlign:'left',borderRadius:8,cursor:'pointer'}} onMouseEnter={e=>e.currentTarget.style.background='var(--surface2)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'} onClick={handleLogout}>Log Out</button>
               </div>
             )}
           </div>
