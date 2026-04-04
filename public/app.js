@@ -129,7 +129,7 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(project.name)} - Bug Report</title>
+  <title>${escapeHtml(project.name)} - Issue Report</title>
   <meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8">
   <style>
     table { mso-displayed-decimal-separator:"\\."; mso-displayed-thousand-separator:"\\,"; }
@@ -160,7 +160,7 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
     </tr>
     <tr>
       <td colspan="7">
-        <a class="report-link" href="${escapeHtml(window.location.origin)}">${escapeHtml(project.name)} - Bug List</a>
+        <a class="report-link" href="${escapeHtml(window.location.origin)}">${escapeHtml(project.name)} - Issue Report</a>
       </td>
     </tr>
     <tr>
@@ -1038,7 +1038,19 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
   const [tab,setTab]=useState('comments');
   const [projectPermissions, setProjectPermissions] = useState(new Set());
   const [showCurl, setShowCurl] = useState(false);
-  useEffect(()=>{ api.get(`/api/bugs/${bugId}`).then(setBug); },[bugId]);
+  useEffect(()=>{
+    let active = true;
+    api.get(`/api/bugs/${bugId}`).then(data => {
+      if (!active) return;
+      if (data?.error || !data?.id) {
+        toast(data?.error || 'Issue not found', 'error');
+        onClose();
+        return;
+      }
+      setBug(data);
+    });
+    return () => { active = false; };
+  },[bugId]);
   useEffect(()=>{
     if (!bug?.projectId) return;
     api.get(`/api/rbac/me/permissions?projectId=${bug.projectId}`)
@@ -1056,6 +1068,16 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
     setComment(''); const fresh=await api.get(`/api/bugs/${bugId}`); setBug(fresh); toast('Comment added','success');
   };
   const deleteComment = async cid => { await api.delete(`/api/bugs/${bugId}/comments/${cid}`); const fresh=await api.get(`/api/bugs/${bugId}`); setBug(fresh); };
+  const deleteIssue = async () => {
+    const res = await api.delete(`/api/bugs/${bugId}`);
+    if (res?.error) {
+      toast(res.error, 'error');
+      return;
+    }
+    onClose();
+    if (onDelete) await onDelete(bugId);
+    toast('Issue deleted', 'info');
+  };
   const project=bug?projects.find(p=>p.id===bug.projectId):null;
   const assignee=bug?resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']):null;
   const reporter=bug?resolveIssueUser(bug,users,'reporterId','Raised By'):null;
@@ -1070,7 +1092,7 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
         </div>
         <div style={{display:'flex',gap:6,marginLeft:16}}>
           <button className="btn btn-ghost btn-sm" onClick={()=>setEditing(true)}>✏ Edit</button>
-          <button className="btn btn-danger btn-sm" onClick={async()=>{await api.delete(`/api/bugs/${bugId}`);onDelete(bugId);onClose();toast('Issue deleted','info');}}>🗑 Delete</button>
+          <button className="btn btn-danger btn-sm" onClick={deleteIssue}>🗑 Delete</button>
           <button className="btn-icon" onClick={onClose}>✕</button>
         </div>
       </div>
@@ -1177,7 +1199,7 @@ function DashboardLegacy({ projects, users, currentProject, onNavigate, currentU
           <tbody>{recentBugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td>{!currentProject&&<td><span className="text-muted text-sm">{project?.name||'—'}</span></td>}<td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
         )}
       </div>
-      {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const nextStats = await api.get(url); setStats(nextStats); setSelectedBug(null); }}/>}
+      {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); setSelectedBug(null); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }}/>}
       {showExportFilters&&(
         <Modal onClose={()=>setShowExportFilters(false)}>
           <div className="modal-header"><h2 className="modal-title">Export Report Filters</h2><button className="btn-icon" onClick={()=>setShowExportFilters(false)}>✕</button></div>
@@ -1369,7 +1391,7 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
           </div>
         );
       })()}
-      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]); setStats(nextStats); setAllBugs(nextBugs); }} onDelete={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const nextStats = await api.get(statsUrl); setStats(nextStats); setSelectedBug(null); }} />}
+      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={async () => { const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]); setStats(nextStats); setAllBugs(nextBugs); }} onDelete={async (id) => { setAllBugs(bs => bs.filter(b => b.id !== id)); setSelectedBug(null); const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats'; const bugsUrl = currentProject ? `/api/bugs?projectId=${currentProject.id}` : '/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]); setStats(nextStats); setAllBugs(nextBugs); }} />}
       <ExportReportFiltersModal visible={showExportFilters} onClose={closeExportModal} currentProject={currentProject} projects={projects} users={users} exportFilters={exportFilters} setExportFilter={setExportFilter} onReset={resetExportFilters} onExport={exportReport} />
     </div>
   );
@@ -1380,12 +1402,17 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
   const [filters, setFilters] = useState({ status:'', priority:'', type:'', assigneeId:'', search:'' });
   const [showCreate, setShowCreate] = useState(false);
   const [selectedBug, setSelectedBug] = useState(null);
+  const [showMetrics, setShowMetrics] = useState(false);
+  const [metricsStats, setMetricsStats] = useState(null);
+  const [metricsChartsReady, setMetricsChartsReady] = useState(false);
   const [page, setPage] = useState(1);
   const statusOptions = ['To Do','In Progress','In Review','Done'].map(value => ({ value, label: value }));
   const priorityOptions = ['Critical','High','Medium','Low'].map(value => ({ value, label: value }));
   const typeOptions = ['Bug','Feature','Task','Improvement'].map(value => ({ value, label: value }));
   const assigneeOptions = users.map(user => ({ value: user.id, label: user.name }));
   const pageSize = 20;
+  const metricsLineRef = useRef(null), metricsDoughnutRef = useRef(null), metricsBarRef = useRef(null);
+  const metricsLineChart = useRef(null), metricsDoughnutChart = useRef(null), metricsBarChart = useRef(null);
   const { showExportFilters, exportFilters, setExportFilter, openExportModal, closeExportModal, resetExportFilters, exportReport } = useProjectReportExport({ currentProject, projects, users, toast });
   const load = useCallback(() => {
     const params = new URLSearchParams();
@@ -1396,6 +1423,36 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setPage(1); }, [currentProject, filters.status, filters.priority, filters.type, filters.assigneeId, filters.search]);
+  useEffect(() => {
+    if (!showMetrics) return;
+    const statsUrl = currentProject ? `/api/stats?projectId=${currentProject.id}` : '/api/stats';
+    api.get(statsUrl).then(setMetricsStats);
+  }, [showMetrics, currentProject]);
+  useEffect(() => {
+    let active = true;
+    if (!showMetrics || !metricsStats || metricsStats.error || !Array.isArray(metricsStats.daily) || !metricsStats.byStatus || !metricsStats.byPriority) return;
+    setMetricsChartsReady(false);
+    ensureChartJsLoaded()
+      .then((ChartLib) => {
+        if (!active || !metricsLineRef.current || !metricsDoughnutRef.current || !metricsBarRef.current) return;
+        setMetricsChartsReady(true);
+        if (metricsLineChart.current) metricsLineChart.current.destroy();
+        metricsLineChart.current = new ChartLib(metricsLineRef.current, { type:'line', data:{ labels:metricsStats.daily.map(d => d.label), datasets:[{ label:'Issues', data:metricsStats.daily.map(d => d.count), borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.15)', tension:0.4, fill:true, pointBackgroundColor:'#6366f1', pointRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
+        if (metricsDoughnutChart.current) metricsDoughnutChart.current.destroy();
+        metricsDoughnutChart.current = new ChartLib(metricsDoughnutRef.current, { type:'doughnut', data:{ labels:Object.keys(metricsStats.byStatus), datasets:[{ data:Object.values(metricsStats.byStatus), backgroundColor:['#475569','#6366f1','#fbbf24','#10b981'], borderWidth:0, hoverOffset:6 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', boxWidth:12, font:{ size:11 } } } } } });
+        if (metricsBarChart.current) metricsBarChart.current.destroy();
+        metricsBarChart.current = new ChartLib(metricsBarRef.current, { type:'bar', data:{ labels:Object.keys(metricsStats.byPriority), datasets:[{ label:'Issues', data:Object.values(metricsStats.byPriority), backgroundColor:['#ef4444','#fb923c','#fbbf24','#94a3b8'], borderRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ display:false }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
+      })
+      .catch(() => {
+        if (active) setMetricsChartsReady(false);
+      });
+    return () => {
+      active = false;
+      if (metricsLineChart.current) metricsLineChart.current.destroy();
+      if (metricsDoughnutChart.current) metricsDoughnutChart.current.destroy();
+      if (metricsBarChart.current) metricsBarChart.current.destroy();
+    };
+  }, [showMetrics, metricsStats]);
   const setFilter = (key, value) => setFilters(f => ({ ...f, [key]: value }));
   const totalPages = Math.max(1, Math.ceil(bugs.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -1403,7 +1460,7 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
 
   return (
     <div>
-      <div className="page-header"><div><h1>Issue List</h1><p>{currentProject ? currentProject.name : 'All Projects'} · {bugs.length} issue{bugs.length!==1?'s':''}</p></div><div style={{display:'flex',gap:10}}><button className="btn btn-ghost" onClick={openExportModal}>Export Report</button><button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ Create Issue</button></div></div>
+      <div className="page-header"><div><h1>Issue List</h1><p>{currentProject ? currentProject.name : 'All Projects'} - {bugs.length} issue{bugs.length!==1?'s':''}</p></div><div style={{display:'flex',gap:10}}><button className="btn btn-ghost" onClick={() => setShowMetrics(v => !v)}>{showMetrics ? 'Hide Metrics' : 'Show Metrics'}</button><button className="btn btn-ghost" onClick={openExportModal}>Export Report</button><button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ Create Issue</button></div></div>
       <div className="filters-bar">
         <div style={{position:'relative'}}><span className="search-icon">🔍</span><input style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'7px 12px 7px 32px',color:'var(--text)',outline:'none',width:220}} placeholder="Search issues…" value={filters.search} onChange={e => setFilter('search', e.target.value)} /></div>
         <SearchableSelect value={filters.status} onChange={value => setFilter('status', value)} options={statusOptions} placeholder="All Statuses" width={150} />
@@ -1412,6 +1469,27 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
         <SearchableSelect value={filters.assigneeId} onChange={value => setFilter('assigneeId', value)} options={assigneeOptions} placeholder="All Assignees" width={230} />
         {Object.values(filters).some(Boolean) && <button className="btn btn-ghost btn-sm" onClick={() => { setFilters({ status:'', priority:'', type:'', assigneeId:'', search:'' }); setPage(1); }}>Clear ✕</button>}
       </div>
+      {showMetrics && metricsStats && !metricsStats.error && (
+        <>
+          <div className="stats-grid" style={{marginBottom:20}}>
+            {[{label:'Total Issues',value:metricsStats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:metricsStats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:metricsStats.doneCount,sub:'marked as done',color:'#10b981'},{label:'Critical',value:metricsStats.byPriority.Critical,sub:'critical priority',color:'#ef4444'}].map(card => (
+              <div key={card.label} className="stat-card"><div className="label">{card.label}</div><div className="value" style={{color:card.color}}>{card.value}</div><div className="sub">{card.sub}</div></div>
+            ))}
+          </div>
+          <div className="charts-grid" style={{marginBottom:20}}>
+            <div className="chart-card"><h3>Issues Created (Last 7 Days)</h3><div className="chart-wrap">{!metricsChartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart...</div>}<canvas ref={metricsLineRef} style={{display:metricsChartsReady?'block':'none'}} /></div></div>
+            <div className="chart-card"><h3>By Status</h3><div className="chart-wrap">{!metricsChartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart...</div>}<canvas ref={metricsDoughnutRef} style={{display:metricsChartsReady?'block':'none'}} /></div></div>
+            <div className="chart-card"><h3>By Priority</h3><div className="chart-wrap">{!metricsChartsReady && <div style={{color:'var(--muted)',fontSize:12,padding:'24px 0',textAlign:'center'}}>Loading chart...</div>}<canvas ref={metricsBarRef} style={{display:metricsChartsReady?'block':'none'}} /></div></div>
+          </div>
+        </>
+      )}
+      {showMetrics && metricsStats?.error && (
+        <div className="empty-state" style={{marginBottom:20}}>
+          <div className="icon">!</div>
+          <h3>Metrics Unavailable</h3>
+          <p>{metricsStats.error}</p>
+        </div>
+      )}
       {bugs.length===0 ? <div className="empty-state"><div className="icon">🎉</div><h3>No issues found</h3><p>Try adjusting your filters or create a new issue.</p></div> : (
         <div className="table-card">
           <div style={{display:'flex',alignItems:'flex-start',gap:12,padding:'16px 16px 0'}}>
@@ -1434,7 +1512,7 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
         </div>
       )}
       {showCreate && <BugModal projects={projects} users={users} currentProject={currentProject} onClose={() => setShowCreate(false)} toast={toast} onSave={() => { load(); setShowCreate(false); }} />}
-      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={() => load()} onDelete={() => load()} />}
+      {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={() => load()} onDelete={async (id) => { setBugs(bs => bs.filter(b => b.id !== id)); setSelectedBug(null); await load(); }} />}
       <ExportReportFiltersModal visible={showExportFilters} onClose={closeExportModal} currentProject={currentProject} projects={projects} users={users} exportFilters={exportFilters} setExportFilter={setExportFilter} onReset={resetExportFilters} onExport={exportReport} />
     </div>
   );
@@ -2645,6 +2723,7 @@ function App() {
   const [authUser, setAuthUser]     = useState(null);
   const [authOrg, setAuthOrg]       = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [view, setView]             = useState('dashboard');
   const [projects, setProjects]     = useState([]);
   const [users, setUsers]           = useState([]);
@@ -2654,6 +2733,7 @@ function App() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [projectSearch, setProjectSearch] = useState('');
+  const [projectsLoading, setProjectsLoading] = useState(false);
   const [toasts, setToasts]         = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [theme, setTheme]           = useState(() => localStorage.getItem('bt_theme') || 'light');
@@ -2692,8 +2772,10 @@ function App() {
   // ── Load app data after login ──
   useEffect(() => {
     if (!authUser) return;
+    setProjectsLoading(true);
     Promise.all([api.get('/api/projects'), api.get('/api/members'), api.get('/api/bugs')])
-      .then(([p, u, b]) => { setProjects(p); setUsers(u); setAllBugs(b); });
+      .then(([p, u, b]) => { setProjects(p); setUsers(u); setAllBugs(b); })
+      .finally(() => setProjectsLoading(false));
   }, [authUser]);
 
   // ── Presence: heartbeat + poll online users ──
@@ -2736,22 +2818,21 @@ function App() {
   };
 
   const handleLogout = async () => {
+    setLoggingOut(true);
     await api.post('/api/auth/logout', {});
     Token.clear();
     sessionStorage.removeItem('bt_root_redirecting');
-    setAuthUser(null);
-    setAuthOrg(null);
-    setProjects([]); setUsers([]); setAllBugs([]);
     document.title = 'FixPulse - Login';
-    window.history.replaceState({}, '', '/login');
-    toast('Logged out successfully', 'info');
+    window.location.replace('/login');
   };
 
   const currentProject = projects.find(p => p.id === currentProjectId) || null;
   const visibleProjects = projects.filter(project => project.name.toLowerCase().includes(projectSearch.toLowerCase()));
   const reloadData = () => {
+    setProjectsLoading(true);
     Promise.all([api.get('/api/projects'), api.get('/api/members')])
-      .then(([p, u]) => { setProjects(p); setUsers(u); });
+      .then(([p, u]) => { setProjects(p); setUsers(u); })
+      .finally(() => setProjectsLoading(false));
   };
   const handleProjectCreated = project => {
     setCurrentProjectId(project.id);
@@ -2781,11 +2862,7 @@ function App() {
     return () => document.removeEventListener('click', closeMenu);
   }, []);
 
-  if (!authChecked) return (
-    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)', color:'var(--muted)' }}>
-      Loading…
-    </div>
-  );
+  if (!authChecked || loggingOut) return null;
 
   if (!authUser) return (
     <>
@@ -2818,24 +2895,33 @@ function App() {
 
         <div className="sidebar-section">
           <div className="sidebar-label">Projects</div>
-          <div style={{padding:'0 12px 10px'}}>
-            <input
-              className="form-input"
-              value={projectSearch}
-              onChange={e=>setProjectSearch(e.target.value)}
-              placeholder="Search projects..."
-              style={{height:36, fontSize:13}}
-            />
-          </div>
-          <div className={`sidebar-item ${!currentProjectId?'active':''}`} onClick={()=>setCurrentProjectId(null)}>
-            <span style={{width:10,height:10,borderRadius:'50%',background:'var(--muted)',flexShrink:0}}/><span className="label">All Projects</span>
-            <button className="btn-icon" style={{marginLeft:'auto',width:24,height:24,fontSize:14}} title="Create Project" onClick={e=>{e.stopPropagation();setShowSidebarProjectCreate(true);}}>+</button>
-          </div>
-          {visibleProjects.map(p => (
-            <div key={p.id} className={`sidebar-item ${currentProjectId===p.id?'active':''}`} onClick={()=>{ setCurrentProjectId(p.id); setView('list'); }}>
-              <span style={{width:10,height:10,borderRadius:'50%',background:p.color,flexShrink:0}}/><span className="label">{p.name}</span>
+          {projectsLoading ? (
+            <div style={{padding:'12px',color:'var(--muted)',fontSize:13,display:'flex',alignItems:'center',gap:10}}>
+              <span className="btn-spinner" style={{width:16,height:16,borderWidth:2}}/>
+              <span>Loading projects…</span>
             </div>
-          ))}
+          ) : (
+            <>
+              <div style={{padding:'0 12px 10px'}}>
+                <input
+                  className="form-input"
+                  value={projectSearch}
+                  onChange={e=>setProjectSearch(e.target.value)}
+                  placeholder="Search projects..."
+                  style={{height:36, fontSize:13}}
+                />
+              </div>
+              <div className={`sidebar-item ${!currentProjectId?'active':''}`} onClick={()=>setCurrentProjectId(null)}>
+                <span style={{width:10,height:10,borderRadius:'50%',background:'var(--muted)',flexShrink:0}}/><span className="label">All Projects</span>
+                <button className="btn-icon" style={{marginLeft:'auto',width:24,height:24,fontSize:14}} title="Create Project" onClick={e=>{e.stopPropagation();setShowSidebarProjectCreate(true);}}>+</button>
+              </div>
+              {visibleProjects.map(p => (
+                <div key={p.id} className={`sidebar-item ${currentProjectId===p.id?'active':''}`} onClick={()=>{ setCurrentProjectId(p.id); setView('list'); }}>
+                  <span style={{width:10,height:10,borderRadius:'50%',background:p.color,flexShrink:0}}/><span className="label">{p.name}</span>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </aside>
 

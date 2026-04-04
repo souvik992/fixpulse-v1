@@ -7,9 +7,50 @@
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <link rel="shortcut icon" href="/favicon.ico" />
   <link rel="apple-touch-icon" href="/fixpulse-favicon-source.png" />
+  <style>
+    .boot-shell {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f4f5f7;
+      color: #172b4d;
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+    .boot-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      padding: 28px 32px;
+      border: 1px solid #dfe1e6;
+      border-radius: 14px;
+      background: #ffffff;
+      box-shadow: 0 10px 30px rgba(9,30,66,.08);
+    }
+    .boot-spinner {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 3px solid rgba(0,82,204,.18);
+      border-top-color: #0052cc;
+      animation: boot-spin .7s linear infinite;
+    }
+    .boot-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: .02em;
+    }
+    .boot-subtitle {
+      font-size: 12px;
+      color: #5e6c84;
+    }
+    @keyframes boot-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <link rel="stylesheet" href="/styles.css" />
   <script>
     (function () {
@@ -19,7 +60,14 @@
   </script>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel" src="/app.js"></script>
+  <div id="root">
+    <div class="boot-shell">
+      <div class="boot-card">
+        <div class="boot-spinner"></div>
+        <div class="boot-title">Loading...</div>
+      </div>
+    </div>
+  </div>
+  <script src="/app.bundle.js" defer></script>
 </body>
 </html>
