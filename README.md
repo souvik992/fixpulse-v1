@@ -13,7 +13,6 @@ It supports company workspaces, JWT authentication, role-based team management, 
 - Team member invite, update, removal, and password reset flows
 - Project creation and deletion
 - Issue creation, editing, filtering, and deletion
-- Kanban board with status-based workflow
 - Dashboard stats by status, priority, type, and daily issue volume
 - Comments and activity history on issues
 - Organization settings for admins
@@ -68,41 +67,12 @@ DB_PASSWORD=bugtracker_secret
 
 ## Running The App
 
-1. Install Node.js
-2. Install Docker Desktop
-3. Install dependencies:
-
-```bash
-npm install
-```
-
-4. Start PostgreSQL:
-
-```bash
-npm run db:up
-```
-
-5. Start the app:
-
-```bash
-npm start
-```
-
-6. Open:
-
-```text
-http://localhost:3000
-```
+Open the app at `http://localhost:3000` after your environment is already running.
 
 ## Available Scripts
 
 - `npm start` - start the production server
 - `npm run dev` - start with `nodemon`
-- `npm run db:up` - start PostgreSQL with Docker Compose
-- `npm run db:down` - stop PostgreSQL
-- `npm run db:logs` - view PostgreSQL logs
-- `npm run db:reset` - recreate the database container and volume
-- `npm run db:psql` - open a `psql` shell inside the container
 
 ## User Flow
 
@@ -112,7 +82,7 @@ http://localhost:3000
 4. Create projects
 5. Add team members
 6. Create and manage issues
-7. Use the dashboard, board, list, team, and settings views
+7. Use the dashboard, issue list, team, and settings views
 
 ## Roles
 
@@ -188,7 +158,6 @@ http://localhost:3000
 
 - Authentication screen
 - Dashboard
-- Kanban board
 - Issues list
 - Projects page
 - Team page

@@ -43,6 +43,7 @@ app.use(compression());
 // 25 MB covers multiple image attachments as base64 data URLs; for large file uploads consider object storage
 app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h', etag: true }));
+app.use('/doc', express.static(path.join(__dirname, 'doc'), { maxAge: '1h', etag: true }));
 
 // Health check — no auth, used by load balancers and uptime monitors
 app.get('/health', (_req, res) => res.json({ ok: true, uptime: Math.floor(process.uptime()) }));
@@ -241,6 +242,46 @@ function normalizeOrgDataSource(payload = {}, existing = {}) {
     dataSourceFileData: hasNewUpload ? next.dataSourceFileData : existing.data_source_file_data || null,
     dataSourceSyncEnabled: next.dataSourceSyncEnabled,
   };
+}
+
+async function createUserNotification({ orgId, userId, bugId = null, type = 'assignment', title, message = '', metadata = {} }) {
+  if (!orgId || !userId || !title) return null;
+  const { rows } = await db.query(
+    `INSERT INTO notifications (org_id, user_id, bug_id, type, title, message, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+     RETURNING *`,
+    [orgId, userId, bugId, type, title, message, JSON.stringify(metadata || {})]
+  );
+  return camel(rows[0]);
+}
+
+async function notifyBugAssignment({ orgId, bug, assigneeId, actorName, reason }) {
+  if (!orgId || !bug?.id || !assigneeId) return null;
+  const projectName = bug.projectName || bug.project_name || '';
+  const key = bug.key || '';
+  const title = reason === 'created' ? 'New issue assigned' : 'Issue assigned to you';
+  const message = [
+    key ? `${key}:` : '',
+    bug.title,
+    actorName ? `by ${actorName}` : '',
+  ].filter(Boolean).join(' ');
+  return createUserNotification({
+    orgId,
+    userId: assigneeId,
+    bugId: bug.id,
+    type: 'assignment',
+    title,
+    message,
+    metadata: {
+      reason,
+      bugKey: key,
+      bugTitle: bug.title,
+      projectId: bug.projectId || bug.project_id || null,
+      projectName,
+      status: bug.status || null,
+      priority: bug.priority || null,
+    },
+  });
 }
 
 async function getOrgPlanState(orgId) {
@@ -595,6 +636,85 @@ app.post('/api/auth/logout', (_, res) => res.json({ success: true }));
 
 app.get('/api/plans', auth, async (_req, res) => {
   res.json(Object.values(PLAN_DEFINITIONS));
+});
+
+app.get('/api/notifications', auth, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const unreadOnly = String(req.query.unreadOnly || '') === '1';
+    const since = String(req.query.since || '').trim();
+    const values = [req.user.id];
+    const filters = ['n.user_id = $1'];
+
+    if (unreadOnly) {
+      values.push(false);
+      filters.push(`n.is_read = $${values.length}`);
+    }
+    if (since) {
+      values.push(new Date(since).toISOString());
+      filters.push(`n.created_at > $${values.length}`);
+    }
+
+    values.push(limit);
+    const { rows } = await db.query(
+      `SELECT n.*,
+              b.key AS bug_key,
+              b.title AS bug_title,
+              p.name AS project_name
+       FROM notifications n
+       LEFT JOIN bugs b ON b.id = n.bug_id
+       LEFT JOIN projects p ON p.id = b.project_id
+       WHERE ${filters.join(' AND ')}
+       ORDER BY n.created_at DESC
+       LIMIT $${values.length}`,
+      values
+    );
+    const { rows: unreadRows } = await db.query(
+      'SELECT COUNT(*)::int AS unread_count FROM notifications WHERE user_id = $1 AND is_read = FALSE',
+      [req.user.id]
+    );
+    res.json({
+      items: camels(rows),
+      unreadCount: unreadRows[0]?.unread_count || 0,
+      serverTime: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/notifications/:id/read', auth, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `UPDATE notifications
+       SET is_read = TRUE, read_at = COALESCE(read_at, NOW())
+       WHERE id = $1 AND user_id = $2
+       RETURNING *`,
+      [req.params.id, req.user.id]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+    const { rows: unreadRows } = await db.query(
+      'SELECT COUNT(*)::int AS unread_count FROM notifications WHERE user_id = $1 AND is_read = FALSE',
+      [req.user.id]
+    );
+    res.json({ item: camel(rows[0]), unreadCount: unreadRows[0]?.unread_count || 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/notifications/read-all', auth, async (req, res) => {
+  try {
+    await db.query(
+      'UPDATE notifications SET is_read = TRUE, read_at = COALESCE(read_at, NOW()) WHERE user_id = $1 AND is_read = FALSE',
+      [req.user.id]
+    );
+    res.json({ success: true, unreadCount: 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.post('/api/auth/forgot-password', async (req, res) => {
@@ -988,21 +1108,38 @@ app.post('/api/members/:id/reassign', auth, checkPermission(PERMISSIONS.MANAGE_U
       return res.status(404).json({ error: 'Target member not found' });
     }
 
-    const result = await db.query(
-      'UPDATE bugs SET assignee_id=$1, updated_at=NOW() WHERE org_id=$2 AND assignee_id=$3',
-      [targetUserId, req.user.orgId, req.params.id]
-    );
+      const { rows: movedBugsBeforeUpdate } = await db.query(
+        `SELECT b.id, b.key, b.title, b.project_id, p.name AS project_name, b.status, b.priority
+         FROM bugs b
+         LEFT JOIN projects p ON p.id = b.project_id
+         WHERE b.org_id=$1 AND b.assignee_id=$2`,
+        [req.user.orgId, req.params.id]
+      );
 
-    res.json({
-      success: true,
-      movedCount: result.rowCount || 0,
-      sourceUser: camel(sourceRows[0]),
-      targetUser: camel(targetRows[0]),
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+      const result = await db.query(
+        'UPDATE bugs SET assignee_id=$1, updated_at=NOW() WHERE org_id=$2 AND assignee_id=$3',
+        [targetUserId, req.user.orgId, req.params.id]
+      );
+
+      res.json({
+        success: true,
+        movedCount: result.rowCount || 0,
+        sourceUser: camel(sourceRows[0]),
+        targetUser: camel(targetRows[0]),
+      });
+
+      Promise.all(movedBugsBeforeUpdate.map((row) => notifyBugAssignment({
+          orgId: req.user.orgId,
+          bug: camel(row),
+          assigneeId: targetUserId,
+          actorName: req.user.name,
+          reason: 'reassigned',
+        })))
+        .catch((err) => console.warn('Reassign notification failed:', err.message));
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 
 app.delete('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
@@ -1239,7 +1376,7 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
       ]
     );
 
-    const bug = camel(rows[0]);
+    const bug = { ...camel(rows[0]), projectName: project.name };
     await db.query("INSERT INTO activity (bug_id,user_id,type,note) VALUES ($1,$2,'created','Issue created')", [
       bug.id,
       reporterId,
@@ -1253,6 +1390,13 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
 
     // Send email notification to assignee (non-blocking)
     if (assigneeId) {
+      notifyBugAssignment({
+        orgId: req.user.orgId,
+        bug,
+        assigneeId,
+        actorName: req.user.name,
+        reason: 'created',
+      }).catch((err) => console.warn('Assignment notification failed:', err.message));
       db.query('SELECT name, email FROM users WHERE id=$1', [assigneeId])
         .then(({ rows }) => {
           if (!rows.length) return;
@@ -1326,7 +1470,13 @@ app.put('/api/bugs/:id', auth, async (req, res) => {
       }
     }
 
-    const { rows } = await db.query('SELECT * FROM bugs WHERE id=$1', [req.params.id]);
+    const { rows } = await db.query(
+      `SELECT b.*, p.name AS project_name
+       FROM bugs b
+       LEFT JOIN projects p ON p.id = b.project_id
+       WHERE b.id=$1`,
+      [req.params.id]
+    );
     const bug = camel(rows[0]);
     const [comments, activity] = await Promise.all([
       db.query('SELECT * FROM comments WHERE bug_id=$1 ORDER BY created_at ASC', [req.params.id]),
@@ -1337,6 +1487,17 @@ app.put('/api/bugs/:id', auth, async (req, res) => {
 
     cache.del(`stats:${req.user.orgId}:all`, `stats:${req.user.orgId}:${bug.projectId}`);
     res.json(bug);
+
+    const previousAssigneeId = previousRows[0]?.assignee_id || null;
+    if (bug.assigneeId && bug.assigneeId !== previousAssigneeId) {
+      notifyBugAssignment({
+        orgId: req.user.orgId,
+        bug,
+        assigneeId: bug.assigneeId,
+        actorName: req.user.name,
+        reason: 'updated',
+      }).catch((err) => console.warn('Assignment notification failed:', err.message));
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1778,8 +1939,16 @@ app.get('/', (req, res) => {
   }
   return res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+app.get('/doc', (_req, res) => res.sendFile(path.join(__dirname, 'doc', 'index.html')));
+app.get('/doc/', (_req, res) => res.sendFile(path.join(__dirname, 'doc', 'index.html')));
+app.get('/doc/index.html', (_req, res) => res.sendFile(path.join(__dirname, 'doc', 'index.html')));
+app.get('/doc/admin', (_req, res) => res.sendFile(path.join(__dirname, 'doc', 'admin', 'index.html')));
+app.get('/doc/admin/', (_req, res) => res.sendFile(path.join(__dirname, 'doc', 'admin', 'index.html')));
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
-app.get('/app',   (_req, res) => res.sendFile(path.join(__dirname, 'public', 'app-shell.html')));
+app.get('/app',   (req, res) => {
+  if (!hasTokenMarkerCookie(req)) return res.redirect('/login');
+  return res.sendFile(path.join(__dirname, 'public', 'app-shell.html'));
+});
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -1806,6 +1975,21 @@ app.use((err, _req, res, _next) => {
     await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_sheet_pushed ON bugs(sheet_pushed_at) WHERE sheet_pushed_at IS NULL`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_activity_bug_id ON activity(bug_id)`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_comments_bug_id ON comments(bug_id)`);
+    await db.query(`CREATE TABLE IF NOT EXISTS notifications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bug_id UUID REFERENCES bugs(id) ON DELETE CASCADE,
+      type TEXT NOT NULL DEFAULT 'assignment',
+      title TEXT NOT NULL,
+      message TEXT NOT NULL DEFAULT '',
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      is_read BOOLEAN NOT NULL DEFAULT FALSE,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read, created_at DESC)`);
     const server = app.listen(PORT, () => {
       console.log(`\nBugTracker      ->  http://localhost:${PORT}`);
       console.log('Storage         ->  PostgreSQL');

@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FixPulseHQ Docs</title>
+  <meta name="description" content="FixPulseHQ documentation for admins and team members." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="docs-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <img src="./logo.svg" alt="FixPulseHQ" class="brand-logo" />
+        <div>
+          <div class="brand-eyebrow">Documentation</div>
+          <div class="brand-title">FixPulseHQ Docs</div>
+        </div>
+      </div>
+
+      <label class="search-wrap" for="doc-search">
+        <span class="search-label">Quick Search</span>
+        <input id="doc-search" type="search" placeholder="Search pages, roles, sync..." autocomplete="off" />
+      </label>
+
+      <nav class="sidebar-nav" aria-label="Documentation navigation">
+        <div class="nav-group">
+          <div class="nav-title">Getting Started</div>
+          <a href="#overview" class="nav-link">Overview</a>
+          <a href="#quickstart" class="nav-link">Quick Start</a>
+          <a href="#user-journey" class="nav-link">Typical User Journey</a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-title">Core Workflow</div>
+          <a href="#dashboard" class="nav-link">Dashboard</a>
+          <a href="#issues" class="nav-link">Issue Management</a>
+          <a href="#projects" class="nav-link">Projects</a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-title">Admin Panel</div>
+          <a href="#team" class="nav-link">Team Management</a>
+          <a href="#roles" class="nav-link">Roles And Permissions</a>
+          <a href="#settings" class="nav-link">Company Settings</a>
+          <a href="#sync" class="nav-link">Sheet Sync And Write-back</a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-title">Support</div>
+          <a href="#best-practices" class="nav-link">Best Practices</a>
+          <a href="#faq" class="nav-link">FAQ</a>
+          <a href="#troubleshooting" class="nav-link">Troubleshooting</a>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="mini-card">
+          <div class="mini-card-title">Docs Access</div>
+          <p>Log in to manage docs content or jump back into the tracker files.</p>
+          <div class="mini-actions">
+            <a href="./admin/" class="button button-primary">Docs Login</a>
+            <a href="./manage.html" class="button button-ghost">Manage Docs</a>
+            <a href="../public/index.html" class="button button-ghost">Open App Files</a>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="hero">
+        <button class="menu-button" id="menu-button" type="button" aria-label="Toggle navigation">Menu</button>
+        <div class="hero-copy">
+          <div class="eyebrow">Admin + User Guide</div>
+          <h1 data-doc-key="hero_title">Documentation that helps your team start fast and stay aligned.</h1>
+          <p data-doc-key="hero_intro">
+            This guide explains how to use FixPulseHQ day to day, with extra focus on the admin panel,
+            member setup, role assignment, issue flow, and Google Sheet sync.
+          </p>
+          <div class="hero-actions">
+            <a href="#quickstart" class="button button-primary">Start With Quick Setup</a>
+            <a href="#settings" class="button button-ghost">Admin Settings Guide</a>
+          </div>
+        </div>
+        <section class="hero-panel">
+          <div class="panel-title">What You Can Do Here</div>
+          <ul class="check-list">
+            <li>Create projects and structure work by product or team</li>
+            <li>Track issues across dashboard and list views</li>
+            <li>Invite members, reset passwords, and assign responsibilities</li>
+            <li>Control access with roles, permissions, and project scopes</li>
+            <li>Connect Google Sheets or files to sync external issue sources</li>
+          </ul>
+        </section>
+      </header>
+
+      <section class="callout-grid">
+        <article class="callout">
+          <div class="callout-kicker">For Admins</div>
+          <h2>Run the workspace with confidence</h2>
+          <p data-doc-key="admins_callout">Use Team, Roles, and Settings to manage people, permissions, sync sources, and workspace details.</p>
+        </article>
+        <article class="callout">
+          <div class="callout-kicker">For Contributors</div>
+          <h2>Move issues from intake to resolution</h2>
+          <p data-doc-key="contributors_callout">Use the Issue List, comments, and assignment flows to keep work visible and current.</p>
+        </article>
+        <article class="callout">
+          <div class="callout-kicker">For Managers</div>
+          <h2>Stay on top of trends and blockers</h2>
+          <p data-doc-key="managers_callout">Use dashboard summaries, filters, and exported reports to monitor project health and delivery.</p>
+        </article>
+      </section>
+
+      <article class="doc-section" id="overview" data-search="overview product summary fixpulsehq documentation admin team usage">
+        <div class="section-eyebrow">Getting Started</div>
+        <h2>Overview</h2>
+        <p data-doc-key="overview_intro">
+          FixPulseHQ is a workspace-based issue tracker that combines project management, issue tracking,
+          team administration, and spreadsheet sync in one app. Each organization gets its own isolated data,
+          member list, roles, projects, and workflow.
+        </p>
+        <div class="info-grid">
+          <div class="info-card">
+            <h3>Main Views</h3>
+            <p>Dashboard, Issue List, Projects, Team, and Company Settings.</p>
+          </div>
+          <div class="info-card">
+            <h3>Who Uses It</h3>
+            <p>Admins, project managers, developers, testers, and viewers across the same workspace.</p>
+          </div>
+          <div class="info-card">
+            <h3>Where Data Comes From</h3>
+            <p>Native issue creation, Google Sheet sync, Excel upload, or CSV upload.</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="doc-section" id="quickstart" data-search="quick start admin onboarding login register company first user">
+        <div class="section-eyebrow">Getting Started</div>
+        <h2>Quick Start</h2>
+        <ol class="steps">
+          <li data-doc-key="quickstart_1">Open the app and register a company workspace or log in to an existing one.</li>
+          <li data-doc-key="quickstart_2">The first registered user becomes the admin and can access member management and company settings.</li>
+          <li data-doc-key="quickstart_3">Create one or more projects for the products, modules, or teams you want to track.</li>
+          <li data-doc-key="quickstart_4">Add team members from the Team page and assign them the right roles.</li>
+          <li data-doc-key="quickstart_5">Create issues manually or enable a Google Sheet or file-based sync source.</li>
+          <li data-doc-key="quickstart_6">Track work from the Dashboard and Issue List views.</li>
+        </ol>
+      </article>
+
+      <article class="doc-section" id="user-journey" data-search="workflow user journey daily usage create assign move done comment export">
+        <div class="section-eyebrow">Getting Started</div>
+        <h2>Typical User Journey</h2>
+        <div class="timeline">
+          <div class="timeline-item">
+            <strong>1. Intake</strong>
+            <span>Issues arrive from manual entry or a synced source.</span>
+          </div>
+          <div class="timeline-item">
+            <strong>2. Triage</strong>
+            <span>Admins or managers review title, type, priority, project, and assignment.</span>
+          </div>
+          <div class="timeline-item">
+            <strong>3. Execution</strong>
+            <span>Developers move issues through statuses and collaborate through comments.</span>
+          </div>
+          <div class="timeline-item">
+            <strong>4. Review</strong>
+            <span>Teams use the issue list and detail views to verify progress and catch stalled work.</span>
+          </div>
+          <div class="timeline-item">
+            <strong>5. Reporting</strong>
+            <span>Managers export filtered reports or use dashboard metrics for progress reviews.</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="doc-section" id="dashboard" data-search="dashboard stats overview analytics charts export report project filter last sync">
+        <div class="section-eyebrow">Core Workflow</div>
+        <h2>Dashboard</h2>
+        <p>
+          The dashboard is the fastest way to understand issue volume, status distribution, and priority mix.
+          It supports all-project and project-specific views.
+        </p>
+        <ul class="feature-list">
+          <li>Project switcher to focus on a single project or the full workspace.</li>
+          <li>Status and priority summaries for quick health checks.</li>
+          <li>Recent issues section for immediate drill-down.</li>
+          <li>Export report flow for sharing filtered snapshots.</li>
+          <li>Sync timestamp widget so teams know when external data was last refreshed.</li>
+        </ul>
+      </article>
+
+      <article class="doc-section" id="issues" data-search="issue list create edit assign filters status priority type comments activity detail">
+        <div class="section-eyebrow">Core Workflow</div>
+        <h2>Issue Management</h2>
+        <p>
+          The Issue List is the most detailed workspace for browsing and managing issues. Each issue can hold
+          title, description, labels, attachments, reference links, comments, and activity history.
+        </p>
+        <div class="info-grid">
+          <div class="info-card">
+            <h3>Create</h3>
+            <p>Use the create issue modal to set title, project, type, priority, assignee, labels, and references.</p>
+          </div>
+          <div class="info-card">
+            <h3>Filter</h3>
+            <p>Filter by status, priority, type, assignee, and search text to narrow down work quickly.</p>
+          </div>
+          <div class="info-card">
+            <h3>Update</h3>
+            <p>Open any issue to change status, priority, assignee, or add discussion and context.</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="doc-section" id="projects" data-search="projects create delete organization modules teams product areas">
+        <div class="section-eyebrow">Core Workflow</div>
+        <h2>Projects</h2>
+        <p>
+          Projects help you segment work by product, business area, or implementation stream. Every issue belongs to a project.
+        </p>
+        <div class="tip-box">
+          <strong>Recommended:</strong> create a separate project for each major product or source sheet tab so permissions,
+          reporting, and assignment stay clear.
+        </div>
+      </article>
+
+      <article class="doc-section" id="team" data-search="team members admin invite add member reset password reassign issues remove user">
+        <div class="section-eyebrow">Admin Panel</div>
+        <h2>Team Management</h2>
+        <p>
+          The Team page is the main admin workspace for managing users. From here you can invite people,
+          inspect member profiles, review assignments, reassign work, and handle password resets.
+        </p>
+        <div class="info-grid">
+          <div class="info-card">
+            <h3>Add Members</h3>
+            <p>Create a member with name and email, then share the generated login credentials securely.</p>
+          </div>
+          <div class="info-card">
+            <h3>Review Workload</h3>
+            <p>Open a member dashboard to see assigned issues, project spread, and current work state.</p>
+          </div>
+          <div class="info-card">
+            <h3>Reassign Issues</h3>
+            <p>Move assigned issues from one member to another when responsibilities change.</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="doc-section" id="roles" data-search="rbac roles permissions admin project manager developer tester viewer manage users assign roles">
+        <div class="section-eyebrow">Admin Panel</div>
+        <h2>Roles And Permissions</h2>
+        <p>
+          FixPulseHQ uses role-based access control. Roles may be global or project-scoped, allowing admins
+          to keep permissions precise without over-granting access.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Role</th>
+                <th>Best For</th>
+                <th>Typical Access</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Admin</td>
+                <td>Workspace owners</td>
+                <td>Full control over users, projects, roles, settings, and issues.</td>
+              </tr>
+              <tr>
+                <td>Project Manager</td>
+                <td>Delivery leads</td>
+                <td>Manage project work, assignments, and issue progress.</td>
+              </tr>
+              <tr>
+                <td>Developer</td>
+                <td>Individual contributors</td>
+                <td>Work on assigned issues and update execution state.</td>
+              </tr>
+              <tr>
+                <td>Tester</td>
+                <td>QA teams</td>
+                <td>Create bugs, verify fixes, and collaborate in comments.</td>
+              </tr>
+              <tr>
+                <td>Viewer</td>
+                <td>Stakeholders</td>
+                <td>Read-only visibility into issues and reports.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="tip-box">
+          <strong>Admin tip:</strong> prefer project-scoped roles whenever a user only needs access to one product area.
+        </div>
+      </article>
+
+      <article class="doc-section" id="settings" data-search="company settings admin panel organization color logo source type apps script sheet settings">
+        <div class="section-eyebrow">Admin Panel</div>
+        <h2>Company Settings</h2>
+        <p data-doc-key="settings_intro">
+          Company Settings is the administrative control center for the workspace. Admins can update organisation
+          profile details and configure external issue sources.
+        </p>
+        <ul class="feature-list">
+          <li>Update organization name, branding color, and logo.</li>
+          <li>Configure a data source type such as Google Sheet, Excel, or CSV.</li>
+          <li>Enable or pause automatic sync for the workspace.</li>
+          <li>Review last sync timestamp and latest sync errors.</li>
+          <li>Store an Apps Script URL for direct write-back to Google Sheets.</li>
+        </ul>
+        <div class="code-block">
+          <div class="code-title">Admin Checklist</div>
+          <pre><code>1. Open Settings
+2. Choose a data source type
+3. Paste the Google Sheet link or upload a file
+4. Turn on sync
+5. Save settings
+6. Run "Sync Now" to verify incoming issues</code></pre>
+        </div>
+      </article>
+
+      <article class="doc-section" id="sync" data-search="google sheet sync apps script xlsx csv import write back source tab project mapping">
+        <div class="section-eyebrow">Admin Panel</div>
+        <h2>Sheet Sync And Write-back</h2>
+        <p>
+          Sync is designed for teams that already track work in spreadsheets and want FixPulseHQ to become the
+          operational interface without losing that source of truth.
+        </p>
+        <div class="info-grid">
+          <div class="info-card">
+            <h3>Import Behavior</h3>
+            <p>Each tab becomes a project. Matching issue rows are imported and enriched with metadata like source tab and source row.</p>
+          </div>
+          <div class="info-card">
+            <h3>Manual Sync</h3>
+            <p>Use the sync action when you need a fresh pull immediately instead of waiting for scheduled sync.</p>
+          </div>
+          <div class="info-card">
+            <h3>Write-back</h3>
+            <p>Add an Apps Script Web App URL to push issues back into Google Sheets from the app.</p>
+          </div>
+        </div>
+        <div class="tip-box">
+          <strong>Important:</strong> keep source sheet headers consistent. Clean header naming leads to better mapping for reporter, status, priority, and assignee fields.
+        </div>
+      </article>
+
+      <article class="doc-section" id="best-practices" data-search="best practices naming triage assignment roles governance">
+        <div class="section-eyebrow">Support</div>
+        <h2>Best Practices</h2>
+        <ul class="feature-list">
+          <li>Use short, specific issue titles that describe the user-visible problem.</li>
+          <li>Assign every active issue to one owner whenever possible.</li>
+          <li>Keep project boundaries clean so reporting and permissions stay reliable.</li>
+          <li>Use comments for decisions, blockers, and test notes instead of leaving context offline.</li>
+          <li>Review sync settings after changing sheet structure or importing new workbooks.</li>
+        </ul>
+      </article>
+
+      <article class="doc-section" id="faq" data-search="faq common questions admin member login access permissions sync issues">
+        <div class="section-eyebrow">Support</div>
+        <h2>FAQ</h2>
+        <div class="faq-list">
+          <details>
+            <summary>Why can some users not assign issues?</summary>
+            <p>Assignment requires the appropriate project permission, usually provided through an admin or manager role.</p>
+          </details>
+          <details>
+            <summary>Why does the app show “All Projects” in some places?</summary>
+            <p>This means the page is currently displaying workspace-wide data rather than a single project filter.</p>
+          </details>
+          <details>
+            <summary>Can I use spreadsheets and manual issue creation together?</summary>
+            <p>Yes. FixPulseHQ supports native issue creation even when a workspace also syncs from Google Sheets or uploaded files.</p>
+          </details>
+          <details>
+            <summary>Where should admins troubleshoot sync problems?</summary>
+            <p>Start in Company Settings, review last sync status, then verify the source link, file structure, and Apps Script URL if write-back is enabled.</p>
+          </details>
+        </div>
+      </article>
+
+      <article class="doc-section" id="troubleshooting" data-search="troubleshooting login sync project issue missing permission errors">
+        <div class="section-eyebrow">Support</div>
+        <h2>Troubleshooting</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Problem</th>
+                <th>Likely Cause</th>
+                <th>What To Check</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>User cannot see a page</td>
+                <td>Role or permission gap</td>
+                <td>Review the user’s assigned roles and project scope.</td>
+              </tr>
+              <tr>
+                <td>Issues are missing after import</td>
+                <td>Source row mapping or weak sheet headers</td>
+                <td>Check the sheet structure, source tab content, and sync status.</td>
+              </tr>
+              <tr>
+                <td>Assignment looks empty</td>
+                <td>Assignee could not be matched from source data</td>
+                <td>Verify source sheet headers and member records.</td>
+              </tr>
+              <tr>
+                <td>Write-back does not work</td>
+                <td>Apps Script URL is missing or misconfigured</td>
+                <td>Re-deploy the script as a web app and re-save the URL.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </main>
+  </div>
+
+  <script src="./docs-auth.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

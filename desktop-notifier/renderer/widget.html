@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FixPulse Notifier</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="widget">
+    <div class="widget-header">
+      <div class="widget-header-main">
+        <div>
+          <div class="widget-title">FixPulse</div>
+          <div class="widget-meta" id="metaText">Connecting...</div>
+        </div>
+        <div class="window-controls">
+          <button class="window-btn" id="minimizeBtn" title="Minimize to tray">-</button>
+          <button class="window-btn" id="closeBtn" title="Close notifier">×</button>
+        </div>
+      </div>
+      <div class="count-pill" id="countPill">0</div>
+    </div>
+    <div class="toolbar compact">
+      <button class="btn ghost" id="refreshBtn">Refresh</button>
+      <button class="btn ghost" id="muteBtn">Mute</button>
+      <button class="btn ghost" id="readAllBtn">Read All</button>
+      <button class="btn ghost" id="logoutBtn">Logout</button>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+  <audio id="soundPlayer" preload="auto"></audio>
+  <script src="./widget.js"></script>
+</body>
+</html>

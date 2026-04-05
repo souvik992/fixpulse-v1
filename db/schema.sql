@@ -203,6 +203,20 @@ CREATE TABLE IF NOT EXISTS activity (
   created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id      UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  bug_id      UUID        REFERENCES bugs(id) ON DELETE CASCADE,
+  type        TEXT        NOT NULL DEFAULT 'assignment',
+  title       TEXT        NOT NULL,
+  message     TEXT        NOT NULL DEFAULT '',
+  metadata    JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  is_read     BOOLEAN     NOT NULL DEFAULT FALSE,
+  read_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ── indexes ────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -226,3 +240,5 @@ CREATE INDEX IF NOT EXISTS idx_bugs_priority   ON bugs(priority);
 CREATE INDEX IF NOT EXISTS idx_bugs_created    ON bugs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_bug    ON comments(bug_id);
 CREATE INDEX IF NOT EXISTS idx_activity_bug    ON activity(bug_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read, created_at DESC);

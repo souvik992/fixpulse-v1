@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Docs Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body class="auth-page">
+  <main class="auth-layout">
+    <section class="auth-card">
+      <div class="brand auth-brandline">
+        <img src="../logo.svg" alt="FixPulseHQ" class="brand-logo" />
+        <div>
+          <div class="brand-eyebrow">Standalone Docs</div>
+          <div class="brand-title">Docs Admin Login</div>
+        </div>
+      </div>
+      <h1 class="auth-title">Manage your documentation content</h1>
+      <p class="auth-copy">Use the docs admin credentials to open the standalone docs manager. This login is separate from the main app.</p>
+      <form id="docs-login-form" class="auth-form">
+        <label class="field">
+          <span>Username</span>
+          <input id="docs-username" type="text" autocomplete="username" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="docs-password" type="password" autocomplete="current-password" required />
+        </label>
+        <div id="docs-login-error" class="auth-error" hidden>Invalid docs login.</div>
+        <button class="button button-primary auth-submit" type="submit">Log In</button>
+      </form>
+      <div class="auth-links">
+        <a href="../index.html" class="button button-ghost">Back To Docs</a>
+      </div>
+      <div class="tip-box auth-tip">
+        <strong>Default local credentials:</strong> `docsadmin` / `fixpulse-docs`
+      </div>
+    </section>
+  </main>
+  <script src="../docs-auth.js"></script>
+  <script>
+    (function () {
+      if (window.DocsAuth && window.DocsAuth.isLoggedIn()) {
+        window.location.replace('../manage.html');
+        return;
+      }
+      var form = document.getElementById('docs-login-form');
+      var errorBox = document.getElementById('docs-login-error');
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var username = document.getElementById('docs-username').value.trim();
+        var password = document.getElementById('docs-password').value;
+        if (window.DocsAuth.login(username, password)) {
+          window.location.replace('../manage.html');
+          return;
+        }
+        errorBox.hidden = false;
+      });
+    })();
+  </script>
+</body>
+</html>

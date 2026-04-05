@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FixPulse Notifier Login</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <div class="hero">
+      <h1>FixPulse desktop notifier</h1>
+      <p>Stay connected to newly assigned bugs with instant desktop alerts, unread tracking, and optional sound.</p>
+    </div>
+    <div class="login-wrap">
+      <div class="card login-card">
+        <div class="field">
+          <label>Server URL</label>
+          <input id="baseUrl" value="http://localhost:3000" />
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input id="email" type="email" autocomplete="username" />
+        </div>
+        <div class="field">
+          <label>Password / PIN</label>
+          <input id="password" type="password" autocomplete="current-password" />
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="loginBtn">Sign In</button>
+        </div>
+        <div class="error" id="error"></div>
+      </div>
+    </div>
+  </div>
+  <script src="./login.js"></script>
+</body>
+</html>

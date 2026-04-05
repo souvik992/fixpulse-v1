@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manage Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="manage-page">
+  <main class="manage-shell">
+    <header class="manage-header">
+      <div>
+        <div class="brand-eyebrow">Docs Admin</div>
+        <h1>Manage Docs Content</h1>
+        <p>Edit key documentation text and save it locally for this docs site.</p>
+      </div>
+      <div class="manage-actions">
+        <a href="./index.html" class="button button-ghost">Open Docs</a>
+        <button id="docs-logout" class="button button-ghost" type="button">Log Out</button>
+      </div>
+    </header>
+
+    <section class="manage-panel">
+      <form id="docs-manage-form" class="manage-form"></form>
+      <div class="manage-footer">
+        <button id="docs-save" class="button button-primary" type="button">Save Changes</button>
+        <button id="docs-reset" class="button button-ghost" type="button">Reset To Default</button>
+      </div>
+      <div id="docs-status" class="auth-success" hidden>Saved.</div>
+    </section>
+  </main>
+  <script src="./docs-auth.js"></script>
+  <script>
+    (function () {
+      if (!window.DocsAuth || !window.DocsAuth.isLoggedIn()) {
+        window.location.replace('./admin/');
+        return;
+      }
+
+      var schema = window.DocsAuth.getSchema();
+      var values = window.DocsAuth.getContent();
+      var form = document.getElementById('docs-manage-form');
+      var status = document.getElementById('docs-status');
+
+      schema.forEach(function (field) {
+        var wrap = document.createElement('label');
+        wrap.className = 'field';
+
+        var label = document.createElement('span');
+        label.textContent = field.label;
+        wrap.appendChild(label);
+
+        var input;
+        if (field.type === 'textarea') {
+          input = document.createElement('textarea');
+          input.rows = 4;
+        } else {
+          input = document.createElement('input');
+          input.type = 'text';
+        }
+        input.name = field.key;
+        input.value = values[field.key] || '';
+        wrap.appendChild(input);
+        form.appendChild(wrap);
+      });
+
+      document.getElementById('docs-save').addEventListener('click', function () {
+        var payload = {};
+        schema.forEach(function (field) {
+          payload[field.key] = form.elements[field.key].value.trim();
+        });
+        window.DocsAuth.saveContent(payload);
+        status.textContent = 'Docs content saved locally.';
+        status.hidden = false;
+      });
+
+      document.getElementById('docs-reset').addEventListener('click', function () {
+        window.DocsAuth.resetContent();
+        window.location.reload();
+      });
+
+      document.getElementById('docs-logout').addEventListener('click', function () {
+        window.DocsAuth.logout();
+        window.location.replace('./admin/');
+      });
+    })();
+  </script>
+</body>
+</html>

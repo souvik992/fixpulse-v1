@@ -56,6 +56,9 @@
     (function () {
       localStorage.setItem('bt_theme', 'light');
       document.documentElement.setAttribute('data-theme', 'light');
+      if (!localStorage.getItem('bt_token')) {
+        window.location.replace('/login');
+      }
     })();
   </script>
 </head>

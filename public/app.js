@@ -2836,14 +2836,6 @@ function App() {
     };
   }, [authUser]);
 
-  const handleAuth = (user, org) => {
-    setAuthUser(user);
-    setAuthOrg(org || null);
-    sessionStorage.removeItem('bt_root_redirecting');
-    window.history.replaceState({}, '', '/app');
-    document.title = 'FixPulse - Bug Tracker';
-  };
-
   const handleLogout = async () => {
     setLoggingOut(true);
     await api.post('/api/auth/logout', {});
@@ -2880,10 +2872,6 @@ function App() {
   ];
 
   useEffect(() => {
-    if (view === 'board') setView('list');
-  }, [view]);
-
-  useEffect(() => {
     const closeMenu = () => setShowProfileMenu(false);
     document.addEventListener('click', closeMenu);
     return () => document.removeEventListener('click', closeMenu);
@@ -2891,12 +2879,12 @@ function App() {
 
   if (!authChecked || loggingOut) return null;
 
-  if (!authUser) return (
-    <>
-      <AuthPage onAuth={handleAuth}/>
-      <Toast toasts={toasts} dismiss={id=>setToasts(ts=>ts.filter(t=>t.id!==id))}/>
-    </>
-  );
+  if (!authUser) {
+    if (window.location.pathname !== '/login') {
+      window.location.replace('/login');
+    }
+    return null;
+  }
 
   return (
     <div className="app">

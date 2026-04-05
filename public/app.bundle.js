@@ -552,94 +552,6 @@
     }, []);
     return /* @__PURE__ */ React.createElement("div", { className: "modal-overlay", onClick: (e) => e.target === e.currentTarget && onClose() }, /* @__PURE__ */ React.createElement("div", { className: `modal ${large ? "modal-lg" : ""}` }, children));
   }
-  function AuthPage({ onAuth }) {
-    const initialToken = new URLSearchParams(window.location.search).get("reset_token") || "";
-    const [mode, setMode] = useState(initialToken ? "reset-password" : "landing");
-    const [form, setForm] = useState({ companyName: "", name: "", email: "", password: "", confirm: "", color: "#6366f1", resetToken: initialToken });
-    const [avatarFile, setAvatarFile] = useState(null);
-    const [orgLogoFile, setOrgLogoFile] = useState(null);
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [showPw, setShowPw] = useState(false);
-    const set = (k, v) => {
-      setForm((f) => ({ ...f, [k]: v }));
-      setError("");
-    };
-    const submit = async (e) => {
-      e.preventDefault();
-      setError("");
-      if (mode === "forgot-password") {
-        if (!form.email) return setError("Email is required");
-        setLoading(true);
-        try {
-          await fetch("/api/auth/forgot-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: form.email }) });
-          setMode("forgot-sent");
-        } catch {
-          setError("Cannot connect to server.");
-        }
-        setLoading(false);
-        return;
-      }
-      if (mode === "reset-password") {
-        if (form.password.length < 6) return setError("Password must be at least 6 characters");
-        if (form.password !== form.confirm) return setError("Passwords do not match");
-        setLoading(true);
-        try {
-          const res = await fetch("/api/auth/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: form.resetToken, password: form.password }) });
-          const data = await res.json();
-          if (!res.ok) {
-            setError(data.error || "Something went wrong");
-            setLoading(false);
-            return;
-          }
-          window.history.replaceState({}, "", "/");
-          setMode("reset-done");
-        } catch {
-          setError("Cannot connect to server.");
-        }
-        setLoading(false);
-        return;
-      }
-      if (mode === "register") {
-        if (!form.companyName.trim()) return setError("Company name is required");
-        if (!form.name.trim()) return setError("Your name is required");
-        if (form.password.length < 6) return setError("Password must be at least 6 characters");
-        if (form.password !== form.confirm) return setError("Passwords do not match");
-      }
-      setLoading(true);
-      try {
-        const url = mode === "login" ? "/api/auth/login" : "/api/auth/register-company";
-        const avatarDataUrl = avatarFile ? await readImageAsDataUrl(avatarFile) : null;
-        const orgLogoDataUrl = orgLogoFile ? await readImageAsDataUrl(orgLogoFile) : null;
-        const body = mode === "login" ? { email: form.email, password: form.password } : { companyName: form.companyName, name: form.name, email: form.email, password: form.password, color: form.color, avatarDataUrl, orgLogoDataUrl };
-        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        const data = await res.json();
-        if (!res.ok) {
-          setError(data.error || "Something went wrong");
-          setLoading(false);
-          return;
-        }
-        Token.set(data.token);
-        onAuth(data.user, data.org);
-      } catch {
-        setError("Cannot connect to server. Make sure it is running.");
-      }
-      setLoading(false);
-    };
-    const reset = (m) => {
-      setMode(m);
-      setError("");
-      setAvatarFile(null);
-      setOrgLogoFile(null);
-      setForm({ companyName: "", name: "", email: "", password: "", confirm: "", color: "#6366f1", resetToken: "" });
-    };
-    if (mode === "landing") return /* @__PURE__ */ React.createElement("div", { style: { minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { width: "100%", maxWidth: 480, textAlign: "center" } }, /* @__PURE__ */ React.createElement(BrandLogo, { size: 84, rounded: 20, style: { margin: "0 auto 16px" } }), /* @__PURE__ */ React.createElement("h1", { style: { fontSize: 28, fontWeight: 800, marginBottom: 8 } }, "FixPulse"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--muted)", fontSize: 15, marginBottom: 40 } }, "Professional bug & issue tracking for your team"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 12, maxWidth: 320, margin: "0 auto" } }, /* @__PURE__ */ React.createElement("button", { className: "btn btn-primary", style: { justifyContent: "center", padding: "14px 0", fontSize: 15, borderRadius: 10 }, onClick: () => setMode("login") }, "\u{1F511} Log In to Your Company"), /* @__PURE__ */ React.createElement("button", { className: "btn btn-ghost", style: { justifyContent: "center", padding: "14px 0", fontSize: 15, borderRadius: 10, border: "1px solid var(--border)" }, onClick: () => setMode("register") }, "\u{1F3E2} Register a New Company")), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--muted)", fontSize: 12, marginTop: 32 } }, "Multi-tenant \xB7 Role-based access \xB7 Real-time tracking")));
-    return /* @__PURE__ */ React.createElement("div", { style: { minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { width: "100%", maxWidth: mode === "register" ? 480 : 420 } }, /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 28 } }, /* @__PURE__ */ React.createElement(BrandLogo, { size: 64, rounded: 16, style: { margin: "0 auto 10px" } }), /* @__PURE__ */ React.createElement("h1", { style: { fontSize: 20, fontWeight: 700 } }, mode === "login" ? "Welcome back" : "Register your Company"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--muted)", fontSize: 13, marginTop: 4 } }, mode === "login" ? "Log in to your company workspace" : "Create a workspace for your team")), /* @__PURE__ */ React.createElement("div", { style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 28 } }, /* @__PURE__ */ React.createElement("form", { onSubmit: submit }, mode === "register" && /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "\u{1F3E2} Company Name *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", value: form.companyName, onChange: (e) => set("companyName", e.target.value), placeholder: "Acme Corp", required: true, autoFocus: true })), mode === "register" && /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Company Photo or Logo (optional)"), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: "file", accept: "image/*", onChange: (e) => setOrgLogoFile(e.target.files?.[0] || null) })), mode === "register" && /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Your Full Name *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", value: form.name, onChange: (e) => set("name", e.target.value), placeholder: "Jane Doe", required: true })), /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Work Email *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: "email", value: form.email, onChange: (e) => set("email", e.target.value), placeholder: "you@company.com", required: true, autoFocus: mode === "login" })), /* @__PURE__ */ React.createElement("div", { className: "form-group", style: { position: "relative" } }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Password *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: showPw ? "text" : "password", value: form.password, onChange: (e) => set("password", e.target.value), placeholder: mode === "register" ? "Min. 6 characters" : "Your password", required: true, style: { paddingRight: 40 } }), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setShowPw((v) => !v), style: { position: "absolute", right: 10, top: 30, background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 16 } }, showPw ? "\u{1F648}" : "\u{1F441}")), mode === "register" && /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Confirm Password *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: showPw ? "text" : "password", value: form.confirm, onChange: (e) => set("confirm", e.target.value), placeholder: "Repeat password", required: true })), mode === "register" && /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Profile Photo (optional)"), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: "file", accept: "image/*", onChange: (e) => setAvatarFile(e.target.files?.[0]) })), error && /* @__PURE__ */ React.createElement("div", { style: { background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 8, padding: "10px 14px", color: "#ef4444", fontSize: 13, marginBottom: 16 } }, "\u26A0 ", error), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-primary", disabled: loading, style: { width: "100%", justifyContent: "center", padding: "11px 0", fontSize: 14, gap: 8 } }, loading && /* @__PURE__ */ React.createElement("span", { className: "btn-spinner" }), loading ? mode === "login" ? "Signing in\u2026" : "Creating workspace\u2026" : mode === "login" ? "\u{1F511} Sign In" : "\u{1F680} Create Company Workspace")), /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginTop: 16, fontSize: 12, color: "var(--muted)" } }, mode === "login" ? /* @__PURE__ */ React.createElement("span", null, "New to FixPulse? ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--primary)", cursor: "pointer", fontWeight: 600 }, onClick: () => reset("register") }, "Register your company \u2192")) : /* @__PURE__ */ React.createElement("span", null, "Already have a workspace? ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--primary)", cursor: "pointer", fontWeight: 600 }, onClick: () => reset("login") }, "Log in \u2192"))), mode === "login" && /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--primary)", fontSize: 12, cursor: "pointer", fontWeight: 500 }, onClick: () => reset("forgot-password") }, "Forgot your password?")), /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--muted)", fontSize: 12, cursor: "pointer" }, onClick: () => reset("landing") }, "\u2190 Back")))));
-    if (mode === "forgot-password") return /* @__PURE__ */ React.createElement("div", { style: { minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { width: "100%", maxWidth: 420 } }, /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 28 } }, /* @__PURE__ */ React.createElement(BrandLogo, { size: 64, rounded: 16, style: { margin: "0 auto 10px" } }), /* @__PURE__ */ React.createElement("h1", { style: { fontSize: 20, fontWeight: 700 } }, "Forgot Password"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--muted)", fontSize: 13, marginTop: 4 } }, "Enter your email and we'll send you a reset link")), /* @__PURE__ */ React.createElement("div", { style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 28 } }, /* @__PURE__ */ React.createElement("form", { onSubmit: submit }, /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Work Email *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: "email", value: form.email, onChange: (e) => set("email", e.target.value), placeholder: "you@company.com", required: true, autoFocus: true })), error && /* @__PURE__ */ React.createElement("div", { style: { background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 8, padding: "10px 14px", color: "#ef4444", fontSize: 13, marginBottom: 16 } }, "\u26A0 ", error), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-primary", disabled: loading, style: { width: "100%", justifyContent: "center", padding: "11px 0", fontSize: 14 } }, loading ? "\u23F3 Sending\u2026" : "\u{1F4E7} Send Reset Link")), /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginTop: 12 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--muted)", fontSize: 12, cursor: "pointer" }, onClick: () => reset("login") }, "\u2190 Back to Login")))));
-    if (mode === "forgot-sent") return /* @__PURE__ */ React.createElement("div", { style: { minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { width: "100%", maxWidth: 420, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 48, marginBottom: 16 } }, "\u{1F4E7}"), /* @__PURE__ */ React.createElement("h1", { style: { fontSize: 22, fontWeight: 700, marginBottom: 8 } }, "Check your email"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--muted)", fontSize: 14, marginBottom: 24 } }, "If an account exists for that email, we've sent a password reset link. It expires in 1 hour."), /* @__PURE__ */ React.createElement("button", { className: "btn btn-primary", style: { justifyContent: "center", padding: "11px 24px" }, onClick: () => reset("login") }, "Back to Login")));
-    if (mode === "reset-password") return /* @__PURE__ */ React.createElement("div", { style: { minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { width: "100%", maxWidth: 420 } }, /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 28 } }, /* @__PURE__ */ React.createElement(BrandLogo, { size: 64, rounded: 16, style: { margin: "0 auto 10px" } }), /* @__PURE__ */ React.createElement("h1", { style: { fontSize: 20, fontWeight: 700 } }, "Set New Password"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--muted)", fontSize: 13, marginTop: 4 } }, "Choose a strong password for your account")), /* @__PURE__ */ React.createElement("div", { style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 28 } }, /* @__PURE__ */ React.createElement("form", { onSubmit: submit }, /* @__PURE__ */ React.createElement("div", { className: "form-group", style: { position: "relative" } }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "New Password *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: showPw ? "text" : "password", value: form.password, onChange: (e) => set("password", e.target.value), placeholder: "Min. 6 characters", required: true, autoFocus: true, style: { paddingRight: 40 } }), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setShowPw((v) => !v), style: { position: "absolute", right: 10, top: 30, background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 16 } }, showPw ? "\u{1F648}" : "\u{1F441}")), /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Confirm Password *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: showPw ? "text" : "password", value: form.confirm, onChange: (e) => set("confirm", e.target.value), placeholder: "Repeat password", required: true })), error && /* @__PURE__ */ React.createElement("div", { style: { background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 8, padding: "10px 14px", color: "#ef4444", fontSize: 13, marginBottom: 16 } }, "\u26A0 ", error), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-primary", disabled: loading, style: { width: "100%", justifyContent: "center", padding: "11px 0", fontSize: 14 } }, loading ? "\u23F3 Saving\u2026" : "\u{1F512} Set New Password")))));
-    if (mode === "reset-done") return /* @__PURE__ */ React.createElement("div", { style: { minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { width: "100%", maxWidth: 420, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 48, marginBottom: 16 } }, "\u2705"), /* @__PURE__ */ React.createElement("h1", { style: { fontSize: 22, fontWeight: 700, marginBottom: 8 } }, "Password updated!"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--muted)", fontSize: 14, marginBottom: 24 } }, "Your password has been changed. You can now log in with your new password."), /* @__PURE__ */ React.createElement("button", { className: "btn btn-primary", style: { justifyContent: "center", padding: "11px 24px" }, onClick: () => reset("login") }, "Go to Login")));
-  }
   function BugModal({ bug, projects, users, currentProject, onClose, onSave, toast }) {
     const editing = !!bug;
     const [form, setForm] = useState({ title: bug?.title || "", description: bug?.description || "", projectId: bug?.projectId || currentProject?.id || projects[0]?.id || "", type: bug?.type || "Bug", priority: bug?.priority || "Medium", assigneeId: bug?.assigneeId || "", labels: bug?.labels?.join(", ") || "", attachments: bug?.attachments || [], referenceLink: bug?.referenceLink || "", curlCommand: bug?.curlCommand || "" });
@@ -1675,13 +1587,6 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
         sendOfflineBeacon();
       };
     }, [authUser]);
-    const handleAuth = (user, org) => {
-      setAuthUser(user);
-      setAuthOrg(org || null);
-      sessionStorage.removeItem("bt_root_redirecting");
-      window.history.replaceState({}, "", "/app");
-      document.title = "FixPulse - Bug Tracker";
-    };
     const handleLogout = async () => {
       setLoggingOut(true);
       await api.post("/api/auth/logout", {});
@@ -1717,15 +1622,17 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
       ] : []
     ];
     useEffect(() => {
-      if (view === "board") setView("list");
-    }, [view]);
-    useEffect(() => {
       const closeMenu = () => setShowProfileMenu(false);
       document.addEventListener("click", closeMenu);
       return () => document.removeEventListener("click", closeMenu);
     }, []);
     if (!authChecked || loggingOut) return null;
-    if (!authUser) return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(AuthPage, { onAuth: handleAuth }), /* @__PURE__ */ React.createElement(Toast, { toasts, dismiss: (id) => setToasts((ts) => ts.filter((t) => t.id !== id)) }));
+    if (!authUser) {
+      if (window.location.pathname !== "/login") {
+        window.location.replace("/login");
+      }
+      return null;
+    }
     return /* @__PURE__ */ React.createElement("div", { className: "app" }, /* @__PURE__ */ React.createElement("aside", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sidebar-logo", style: { flexDirection: "column", alignItems: "flex-start", gap: 0, paddingBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, width: "100%" } }, /* @__PURE__ */ React.createElement(BrandLogo, { src: authOrg?.logo || BRAND_LOGO, size: 44, rounded: 12 }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, authOrg?.name || "FixPulse"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "var(--muted)", marginTop: 1 } }, "Bug Tracker")))), /* @__PURE__ */ React.createElement("div", { className: "sidebar-section" }, /* @__PURE__ */ React.createElement("div", { className: "sidebar-label" }, "Main"), navItems.map((item) => /* @__PURE__ */ React.createElement("div", { key: item.id, className: `sidebar-item ${view === item.id ? "active" : ""}`, onClick: () => setView(item.id) }, /* @__PURE__ */ React.createElement("span", { className: "icon" }, item.icon), /* @__PURE__ */ React.createElement("span", { className: "label" }, item.label)))), /* @__PURE__ */ React.createElement("div", { className: "sidebar-section" }, /* @__PURE__ */ React.createElement("div", { className: "sidebar-label" }, "Projects"), projectsLoading ? /* @__PURE__ */ React.createElement("div", { style: { padding: "12px", color: "var(--muted)", fontSize: 13, display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("span", { className: "btn-spinner", style: { width: 16, height: 16, borderWidth: 2 } }), /* @__PURE__ */ React.createElement("span", null, "Loading projects\u2026")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { padding: "0 12px 10px" } }, /* @__PURE__ */ React.createElement(
       "input",
       {
