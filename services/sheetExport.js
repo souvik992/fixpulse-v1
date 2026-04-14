@@ -11,7 +11,7 @@ function getXlsx() {
   return xlsxLib;
 }
 
-const SHEET_HEADERS = [
+const LEGACY_SHEET_HEADERS = [
   'S.No',
   'Issue Description',
   'Status',
@@ -26,6 +26,130 @@ const SHEET_HEADERS = [
   'QA Comments',
   'Sprint',
 ];
+
+const COMPACT_SHEET_HEADERS = [
+  'Date Created',
+  'Issue Title',
+  'Raised By',
+  'Issue Type',
+  'Assignee',
+  'Priority',
+  'Status',
+];
+
+function getSheetLayoutVersion(projectOrVersion) {
+  if (typeof projectOrVersion === 'string') return projectOrVersion === 'compact_v2' ? 'compact_v2' : 'legacy';
+  return projectOrVersion?.sheet_layout_version === 'compact_v2' ? 'compact_v2' : 'legacy';
+}
+
+function getSheetHeaders(projectOrVersion) {
+  // Any project with explicit sheet_headers uses them — respects user-defined column order
+  if (typeof projectOrVersion === 'object' && projectOrVersion !== null) {
+    const stored = Array.isArray(projectOrVersion.sheet_headers)
+      ? projectOrVersion.sheet_headers.filter(Boolean)
+      : [];
+    if (stored.length > 0) return stored;
+  }
+  if (getSheetLayoutVersion(projectOrVersion) !== 'compact_v2') {
+    return LEGACY_SHEET_HEADERS;
+  }
+  const customFields = Array.isArray(projectOrVersion?.custom_issue_fields) ? projectOrVersion.custom_issue_fields : [];
+  return [...COMPACT_SHEET_HEADERS, ...customFields.map((field) => String(field?.label || '').trim()).filter(Boolean)];
+}
+
+function getCustomFieldValueMap(bug) {
+  return bug?.custom_fields && typeof bug.custom_fields === 'object' ? bug.custom_fields : {};
+}
+
+/**
+ * Resolve a single sheet column header to its value for a bug row.
+ * Handles all known column names case-insensitively, with fallback to
+ * reading from the description metadata blob.
+ */
+function resolveColumnValue(header, bug, userMap, index, createdDate, customFieldsByLabel) {
+  const hl = String(header || '').trim().toLowerCase();
+  if (/^(s\.?no\.?|#|sr\.?\s*no\.?|serial\s*no\.?|no\.)$/.test(hl)) return String(index + 1);
+  if (/^(date|date created|entry date|created date|logged date|open date)$/.test(hl)) return createdDate;
+  if (/^(raised by|issue raised by|raised date|reporter)$/.test(hl)) return userMap.get(String(bug.reporter_id)) || getMetaValue(bug.description, 'Raised By') || '';
+  if (/^assignee$/.test(hl)) return userMap.get(String(bug.assignee_id)) || '';
+  if (/^(issue description|issue title|title|description of bug|description)$/.test(hl)) return bug.title || '';
+  if (/^status$/.test(hl)) return bug.status || '';
+  if (/^priority$/.test(hl)) return bug.priority || '';
+  if (/^(issue type|bug type|type)$/.test(hl)) return bug.type || '';
+  if (/^module$/.test(hl)) return getMetaValue(bug.description, 'Module') || '';
+  if (/^feature$/.test(hl)) return getMetaValue(bug.description, 'Feature') || '';
+  if (/^(dev comments?|developer comments?)$/.test(hl)) return getMetaValue(bug.description, 'Developer Comments') || getMetaValue(bug.description, 'Dev Comments') || '';
+  if (/^(qa comments?|qa comment)$/.test(hl)) return getMetaValue(bug.description, 'QA Comments') || '';
+  if (/^sprint$/.test(hl)) return getMetaValue(bug.description, 'Sprint') || '';
+  if (/^(location type|location)$/.test(hl)) return getMetaValue(bug.description, 'Location Type') || getMetaValue(bug.description, 'Location') || getMetaValue(bug.description, header) || '';
+  if (/^(retail type|domain retail restaurant|org type)$/.test(hl)) return getMetaValue(bug.description, 'Retail Type') || '';
+  if (/^(environment|envirnoment)$/.test(hl)) return getMetaValue(bug.description, 'Environment') || '';
+  if (/^browser$/.test(hl)) return getMetaValue(bug.description, 'Browser') || '';
+  if (/^(os|os operating system|operating system)$/.test(hl)) return getMetaValue(bug.description, 'Operating System') || '';
+  if (/^(application|product)$/.test(hl)) return getMetaValue(bug.description, 'Application') || '';
+  // Custom fields: look up by label
+  if (customFieldsByLabel) {
+    const h = String(header).trim();
+    if (customFieldsByLabel[h] !== undefined) return customFieldsByLabel[h];
+  }
+  // Fallback: look for header name in description metadata (exact then lowercase)
+  return getMetaValue(bug.description, String(header).trim()) || getMetaValue(bug.description, hl) || '';
+}
+
+function buildSheetRow(bug, userMap, index, projectOrVersion) {
+  const createdDate = bug.created_at ? new Date(bug.created_at).toLocaleDateString('en-GB') : '';
+
+  // If explicit sheet_headers stored (user-defined column order), use for all project types
+  const storedHeaders = Array.isArray(projectOrVersion?.sheet_headers)
+    ? projectOrVersion.sheet_headers.filter(Boolean)
+    : [];
+  if (storedHeaders.length > 0) {
+    const customFields = Array.isArray(projectOrVersion?.custom_issue_fields) ? projectOrVersion.custom_issue_fields : [];
+    const customValues = getCustomFieldValueMap(bug);
+    const customFieldsByLabel = Object.fromEntries(
+      customFields.map(f => [String(f.label || '').trim(), customValues[f.id] || ''])
+    );
+    return storedHeaders.map(h => resolveColumnValue(h, bug, userMap, index, createdDate, customFieldsByLabel));
+  }
+
+  const layoutVersion = getSheetLayoutVersion(projectOrVersion);
+
+  if (layoutVersion === 'compact_v2') {
+    const customFields = Array.isArray(projectOrVersion?.custom_issue_fields) ? projectOrVersion.custom_issue_fields : [];
+    const customValues = getCustomFieldValueMap(bug);
+    const raisedBy = userMap.get(String(bug.reporter_id)) || getMetaValue(bug.description, 'Raised By');
+    const assignee = userMap.get(String(bug.assignee_id)) || '';
+    return [
+      createdDate,
+      bug.title || '',
+      raisedBy,
+      bug.type || '',
+      assignee,
+      bug.priority || '',
+      bug.status || '',
+      ...customFields.map((field) => customValues[field.id] || ''),
+    ];
+  }
+
+  // Default legacy format (no sheet_headers stored)
+  const raisedBy = userMap.get(String(bug.reporter_id)) || getMetaValue(bug.description, 'Raised By');
+  const assignee = userMap.get(String(bug.assignee_id)) || '';
+  return [
+    index + 1,
+    bug.title || '',
+    bug.status || '',
+    bug.priority || '',
+    assignee,
+    bug.type || '',
+    getMetaValue(bug.description, 'Module'),
+    getMetaValue(bug.description, 'Feature'),
+    raisedBy,
+    createdDate,
+    getMetaValue(bug.description, 'Developer Comments'),
+    getMetaValue(bug.description, 'QA Comments'),
+    getMetaValue(bug.description, 'Sprint'),
+  ];
+}
 
 function getMetaValue(description, label) {
   const prefix = `${label}:`;
@@ -52,7 +176,7 @@ function decodeDataUrl(text) {
  * When a project is created, add a new tab (with standard headers) to the
  * org's stored XLSX data source.  No-ops for Google Sheet / CSV sources.
  */
-async function addProjectTabToSheet(orgId, projectName) {
+async function addProjectTabToSheet(orgId, projectName, sheetLayoutVersion = 'legacy') {
   try {
     const { rows } = await db.query(
       'SELECT data_source_type, data_source_file_data FROM organizations WHERE id=$1',
@@ -67,7 +191,7 @@ async function addProjectTabToSheet(orgId, projectName) {
 
     const tabName = safeName(projectName);
     if (!workbook.SheetNames.includes(tabName)) {
-      const ws = XLSX.utils.aoa_to_sheet([SHEET_HEADERS]);
+      const ws = XLSX.utils.aoa_to_sheet([getSheetHeaders(sheetLayoutVersion)]);
       XLSX.utils.book_append_sheet(workbook, ws, tabName);
       const newBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
       await db.query(
@@ -89,8 +213,8 @@ async function addProjectTabToSheet(orgId, projectName) {
  */
 async function exportOrgToXlsxBuffer(orgId, projectId = null) {
   const projectQuery  = projectId
-    ? 'SELECT id, name FROM projects WHERE org_id=$1 AND id=$2 ORDER BY name ASC'
-    : 'SELECT id, name FROM projects WHERE org_id=$1 ORDER BY name ASC';
+    ? 'SELECT id, name, sheet_layout_version, custom_issue_fields FROM projects WHERE org_id=$1 AND id=$2 ORDER BY name ASC'
+    : 'SELECT id, name, sheet_layout_version, custom_issue_fields FROM projects WHERE org_id=$1 ORDER BY name ASC';
   const projectParams = projectId ? [orgId, projectId] : [orgId];
 
   const [{ rows: projects }, { rows: users }] = await Promise.all([
@@ -112,10 +236,16 @@ async function exportOrgToXlsxBuffer(orgId, projectId = null) {
         db.query(
           // Select only columns needed — skips large attachment blobs
           `SELECT id, title, description, status, priority, type,
-                  assignee_id, reporter_id, created_at
+                  assignee_id, reporter_id, created_at, custom_fields
            FROM bugs WHERE org_id=$1 AND project_id=$2 ORDER BY created_at ASC`,
           [orgId, p.id]
-        ).then(({ rows }) => ({ projectName: safeName(p.name), bugs: rows }))
+        ).then(({ rows }) => ({
+          projectName: safeName(p.name),
+          bugs: rows,
+          sheetLayoutVersion: getSheetLayoutVersion(p),
+          customIssueFields: Array.isArray(p.custom_issue_fields) ? p.custom_issue_fields : [],
+          sheetHeaders: Array.isArray(p.sheet_headers) ? p.sheet_headers.filter(Boolean) : [],
+        }))
       )
     );
     projectsData.push(...results);
@@ -125,7 +255,7 @@ async function exportOrgToXlsxBuffer(orgId, projectId = null) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(
       path.join(__dirname, '../workers/xlsxBuild.js'),
-      { workerData: { projects: projectsData, userMap, headers: SHEET_HEADERS } }
+      { workerData: { projects: projectsData, userMap, legacyHeaders: LEGACY_SHEET_HEADERS, compactHeaders: COMPACT_SHEET_HEADERS } }
     );
     worker.once('message', (msg) => {
       if (msg.ok) resolve(Buffer.from(msg.buffer));
@@ -206,39 +336,32 @@ async function pushToAppsScript(orgId, appsScriptUrl, projectId = null) {
     );
     const startIndex = countRows[0]?.count || 0;
 
-    const rows = bugs.map((bug, idx) => [
-      startIndex + idx + 1,
-      bug.title || '',
-      bug.status || '',
-      bug.priority || '',
-      userMap.get(String(bug.assignee_id)) || '',
-      bug.type || '',
-      getMetaValue(bug.description, 'Module'),
-      getMetaValue(bug.description, 'Feature'),
-      userMap.get(String(bug.reporter_id)) || getMetaValue(bug.description, 'Raised By'),
-      bug.created_at ? new Date(bug.created_at).toLocaleDateString('en-GB') : '',
-      getMetaValue(bug.description, 'Developer Comments'),
-      getMetaValue(bug.description, 'QA Comments'),
-      getMetaValue(bug.description, 'Sprint'),
-    ]);
-    sheets.push({ name: safeName(project.name), headers: SHEET_HEADERS, rows });
+    const rows = bugs.map((bug, idx) => buildSheetRow(bug, userMap, startIndex + idx, project));
+    sheets.push({ name: safeName(project.name), headers: getSheetHeaders(project), rows });
     bugs.forEach(b => allPushedIds.push(b.id));
   }
 
   if (sheets.length === 0) return { nothing: true };
 
-  const result = await httpsPost(appsScriptUrl, { action: 'append', sheets });
+  const developerOptions = users.map(u => u.name).filter(Boolean).sort();
+  const result = await httpsPost(appsScriptUrl, { action: 'append', sheets, developerOptions });
   return { ...result, pushedIds: allPushedIds };
 }
 
 /**
  * Push a single empty tab (with headers) to Apps Script when a project is created.
  */
-async function pushNewTabToAppsScript(appsScriptUrl, projectName) {
+async function pushNewTabToAppsScript(appsScriptUrl, projectName, sheetLayoutVersion = 'legacy', customIssueFields = []) {
   return httpsPost(appsScriptUrl, {
     action: 'add_tab',
-    sheets: [{ name: safeName(projectName), headers: SHEET_HEADERS, rows: [] }],
+    sheets: [{ name: safeName(projectName), headers: getSheetHeaders({ sheet_layout_version: sheetLayoutVersion, custom_issue_fields: customIssueFields }), rows: [] }],
   });
 }
 
-module.exports = { addProjectTabToSheet, exportOrgToXlsxBuffer, pushToAppsScript, pushNewTabToAppsScript };
+module.exports = {
+  addProjectTabToSheet,
+  exportOrgToXlsxBuffer,
+  pushToAppsScript,
+  pushNewTabToAppsScript,
+  getSheetLayoutVersion,
+};

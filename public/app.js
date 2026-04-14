@@ -1,6 +1,6 @@
 const { useState, useEffect, useRef, useCallback } = React;
 const API = '';
-const BRAND_LOGO = '/fixpulse-logo.png';
+const BRAND_LOGO = '/fixpulse-logo-small.png';
 
 // ── Token storage ──────────────────────────────────────────────────────────────
 const Token = {
@@ -32,14 +32,29 @@ const api = {
 
 // ── Utility helpers ────────────────────────────────────────────────────────────
 const statusBadge  = s => ({ 'To Do':'badge-status-todo','In Progress':'badge-status-inprogress','In Review':'badge-status-inreview','Done':'badge-status-done' }[s]||'badge-status-todo');
-const priorityBadge = p => ({ Critical:'badge-priority-critical', High:'badge-priority-high', Medium:'badge-priority-medium', Low:'badge-priority-low' }[p]||'badge-priority-medium');
+const priorityBadge = p => ({ P0:'badge-priority-critical', P1:'badge-priority-high', P2:'badge-priority-medium', P3:'badge-priority-low' }[p]||'badge-priority-medium');
 const typeBadge    = t => ({ Bug:'badge-type-bug', Feature:'badge-type-feature', Task:'badge-type-task', Improvement:'badge-type-improvement' }[t]||'badge-type-task');
-const priorityIcon = p => ({ Critical:'🔴', High:'🟠', Medium:'🟡', Low:'🔵' }[p]||'');
+const BADGE_COLORS = {
+  'badge-status-todo':       { bg:'var(--bdg-todo-bg)', fg:'var(--bdg-todo-fg)' },
+  'badge-status-inprogress': { bg:'var(--bdg-prog-bg)', fg:'var(--bdg-prog-fg)' },
+  'badge-status-inreview':   { bg:'var(--bdg-rev-bg)',  fg:'var(--bdg-rev-fg)'  },
+  'badge-status-done':       { bg:'var(--bdg-done-bg)', fg:'var(--bdg-done-fg)' },
+  'badge-priority-critical': { bg:'var(--bdg-crit-bg)', fg:'var(--bdg-crit-fg)' },
+  'badge-priority-high':     { bg:'var(--bdg-high-bg)', fg:'var(--bdg-high-fg)' },
+  'badge-priority-medium':   { bg:'var(--bdg-med-bg)',  fg:'var(--bdg-med-fg)'  },
+  'badge-priority-low':      { bg:'var(--bdg-low-bg)',  fg:'var(--bdg-low-fg)'  },
+  'badge-type-bug':          { bg:'var(--bdg-bug-bg)',  fg:'var(--bdg-bug-fg)'  },
+  'badge-type-feature':      { bg:'var(--bdg-feat-bg)', fg:'var(--bdg-feat-fg)' },
+  'badge-type-task':         { bg:'var(--bdg-task-bg)', fg:'var(--bdg-task-fg)' },
+  'badge-type-improvement':  { bg:'var(--bdg-impr-bg)', fg:'var(--bdg-impr-fg)' },
+};
+const priorityIcon = p => ({ P0:'🔴', P1:'🟠', P2:'🟡', P3:'🔵' }[p]||'');
 const typeIcon     = t => ({ Bug:'🐛', Feature:'✨', Task:'📋', Improvement:'⚡' }[t]||'');
 const statusIcon   = s => ({ 'To Do':'○', 'In Progress':'◑', 'In Review':'◕', 'Done':'●' }[s]||'○');
 const timeAgo      = ts => { const d=Math.floor((Date.now()-new Date(ts))/1000); if(d<60)return 'just now'; if(d<3600)return `${Math.floor(d/60)}m ago`; if(d<86400)return `${Math.floor(d/3600)}h ago`; return `${Math.floor(d/86400)}d ago`; };
 const formatDate   = ts => ts ? new Date(ts).toLocaleDateString('en-GB') : '—';
 const formatDateTime = ts => ts ? new Date(ts).toLocaleString('en-GB') : 'Unavailable';
+const getIssueLastStatusChangeDate = bug => bug?.lastStatusChangeAt || bug?.updatedAt || null;
 const isSheetImportedBug = bug => bug?.sourceKind === 'google_sheet' || Boolean(getMetadataValue(bug?.description, 'Source Tab'));
 const getIssueCreatedDate = bug => isSheetImportedBug(bug) ? (bug?.sourceCreatedAt || null) : (bug?.createdAt || null);
 const formatIssueCreatedDate = bug => {
@@ -69,6 +84,116 @@ const getFirstMetadataValue = (description, labels) => {
     if (value) return value;
   }
   return '';
+};
+const isCompactSheetProject = project => project?.sheetLayoutVersion === 'compact_v2';
+const getProjectCustomFields = project => Array.isArray(project?.customIssueFields) ? project.customIssueFields : [];
+const normalizeCustomFieldId = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || `field_${Date.now().toString(36)}`;
+const getCustomFieldValue = (bug, field) => {
+  const values = bug?.customFields && typeof bug.customFields === 'object' ? bug.customFields : {};
+  return values[field.id] || '';
+};
+const getSheetViewColumns = project => {
+  const base = [
+    { key:'createdAt', label:'Date Created' },
+    { key:'title', label:'Issue Title' },
+    { key:'reporter', label:'Raised By' },
+    { key:'type', label:'Issue Type' },
+    { key:'assignee', label:'Assignee' },
+    { key:'priority', label:'Priority' },
+    { key:'status', label:'Status' },
+  ];
+  return [...base, ...getProjectCustomFields(project).map(field => ({ key:`custom:${field.id}`, label:field.label, field }))];
+};
+const CUSTOM_FIELD_TYPES = [
+  { value:'text', label:'Single line' },
+  { value:'textarea', label:'Paragraph' },
+  { value:'select', label:'Dropdown' },
+  { value:'date', label:'Date' },
+];
+// ── Sheet-form field mapping ───────────────────────────────────────────────────
+const LEGACY_SHEET_HEADERS_CLIENT = ['S.No','Issue Description','Status','Priority','Assignee','Issue Type','Application','OS - Operating System','Browser','Environment','Retail Type','Location Type','Module','Feature','Raised By','Date','Dev Comments','QA Comments','Sprint'];
+const COMPACT_SHEET_HEADERS_CLIENT = ['Date Created','Issue Title','Raised By','Issue Type','Assignee','Priority','Status'];
+const META_PREFIXES = ['Source Tab:','Source Row:','Date:','Raised By:','Application:','Issue Type:','Operating System:','Browser:','Environment:','Retail Type:','Location Type:','Module:','Feature:','Assignee(s):','Priority (Original):','Status (Original):','Sprint:','Version:','QA Check:','Release:','Slicing:','Affected Components:','Mode:','Steps To Reproduce:','Developer Comments:','QA Comments:','Assignee From Sheet:'];
+const extractFreeDescription = desc => String(desc||'').split('\n').filter(l => !META_PREFIXES.some(p => l.startsWith(p))).join('\n').trim();
+const buildLegacyDescription = (freeText, meta) => {
+  const parts = [];
+  if (freeText?.trim()) parts.push(freeText.trim());
+  Object.entries(meta).forEach(([k, v]) => { if (v?.trim()) parts.push(`${k}: ${v.trim()}`); });
+  return parts.join('\n');
+};
+// Null = auto-set (skip in form). Fields referencing same formKey share the same form state slot.
+const SHEET_FORM_FIELD_MAP = {
+  'S.No':null, 'Date Created':null, 'Raised By':null, 'Raised by':null, 'Date':null,
+  'Issue Description': { key:'title',       type:'text',         label:'Issue Description', required:true },
+  'Issue Title':       { key:'title',       type:'text',         label:'Issue Title',        required:true },
+  'Issue Type':        { key:'type',        type:'badge-select', label:'Issue Type',         options:['Bug','Feature','Task','Improvement'], badgeFn:typeBadge, iconFn:typeIcon },
+  'Assignee':          { key:'assigneeId',  type:'user-select',  label:'Assignee' },
+  'Priority':          { key:'priority',    type:'badge-select', label:'Priority',           options:['P0','P1','P2','P3'], badgeFn:priorityBadge, iconFn:priorityIcon },
+  'Status':            { key:'status',      type:'badge-select', label:'Status',             options:['To Do','In Progress','In Review','Done'], badgeFn:statusBadge, iconFn:statusIcon },
+  'Application':         { key:'_application',   type:'text',     label:'Application' },
+  'OS - Operating System': { key:'_os',          type:'text',     label:'OS - Operating System', metaKey:'Operating System' },
+  'Browser':             { key:'_browser',       type:'select',   label:'Browser',   options:['','Chrome','Firefox','Safari','MS Edge','App'] },
+  'Environment':         { key:'_environment',   type:'select',   label:'Environment', options:['','Dev','Stage','Prod','Upcoming-Stage'] },
+  'Retail Type':         { key:'_retailType',    type:'select',   label:'Retail Type', options:['','Grocery','Restaurant','Grocery / Restaurant'] },
+  'Location Type':       { key:'_locationType',  type:'select',   label:'Location Type',     metaKey:'Location Type', options:['','QSR','FINE DINE-IN','Grocery','Grocery / Restaurant','FINE DINE-IN / QSR'] },
+  'Location':            { key:'_locationType',  type:'select',   label:'Location',          metaKey:'Location Type', options:['','QSR','FINE DINE-IN','Grocery','Grocery / Restaurant','FINE DINE-IN / QSR'] },
+  'location':            { key:'_locationType',  type:'select',   label:'Location',          metaKey:'Location Type', options:['','QSR','FINE DINE-IN','Grocery','Grocery / Restaurant','FINE DINE-IN / QSR'] },
+  'Module':            { key:'_module',     type:'text',         label:'Module' },
+  'Feature':           { key:'_feature',    type:'text',         label:'Feature' },
+  'Dev Comments':      { key:'_devComments',type:'textarea',     label:'Dev Comments',       metaKey:'Developer Comments' },
+  'QA Comments':       { key:'_qaComments', type:'textarea',     label:'QA Comments',        metaKey:'QA Comments' },
+  'Sprint':            { key:'_sprint',     type:'text',         label:'Sprint' },
+};
+// Headers that are auto-generated / don't need a form input
+const AUTO_SKIP_HEADERS = new Set(['S.No','Date Created','Raised By','Date','Issue raised by','Source Tab','Source Row','#','Sr No','Sr.No','Sr. No','No.','Serial No','Serial Number']);
+// Returns ordered list of form field descriptors for a project (excluding title, which is always first)
+const getSheetFormFields = (project, customFieldOverride) => {
+  if (isCompactSheetProject(project)) {
+    const customFields = customFieldOverride || getProjectCustomFields(project);
+    const storedHeaders = Array.isArray(project?.sheetHeaders) && project.sheetHeaders.length > 0 ? project.sheetHeaders : null;
+    if (storedHeaders) {
+      const customByLabel = Object.fromEntries(customFields.map(cf => [String(cf.label||'').trim().toLowerCase(), cf]));
+      const fields = [];
+      for (const h of storedHeaders) {
+        if (AUTO_SKIP_HEADERS.has(h)) continue;
+        const mapped = SHEET_FORM_FIELD_MAP[h];
+        if (mapped === null) continue;
+        if (mapped) {
+          if (mapped.key !== 'title') fields.push(mapped);
+        } else {
+          const cf = customByLabel[h.trim().toLowerCase()];
+          if (cf) {
+            fields.push({ key:`custom:${cf.id}`, type:'custom', label:cf.label, field:cf });
+          } else {
+            const isTA = /comment|notes|remark|step|description|feedback/i.test(h);
+            fields.push({ key:'_metaFields', metaKey:h, type: isTA ? 'meta-textarea' : 'meta-text', label:h });
+          }
+        }
+      }
+      return fields;
+    }
+    const fields = COMPACT_SHEET_HEADERS_CLIENT.map(h => SHEET_FORM_FIELD_MAP[h]).filter(f => f && f.key !== 'title');
+    fields.push(...customFields.map(cf => ({ key:`custom:${cf.id}`, type:'custom', label:cf.label, field:cf })));
+    return fields;
+  }
+  // For legacy projects: use stored per-tab headers if available, else fallback to hardcoded list
+  const headers = (Array.isArray(project?.sheetHeaders) && project.sheetHeaders.length > 0)
+    ? project.sheetHeaders
+    : LEGACY_SHEET_HEADERS_CLIENT;
+  const fields = [];
+  for (const h of headers) {
+    if (AUTO_SKIP_HEADERS.has(h)) continue;
+    const mapped = SHEET_FORM_FIELD_MAP[h];
+    if (mapped === null) continue; // explicitly auto-generated
+    if (mapped) {
+      if (mapped.key !== 'title') fields.push(mapped);
+    } else {
+      // Dynamic field for a column not in SHEET_FORM_FIELD_MAP
+      const isTA = /comment|notes|remark|step|description|feedback/i.test(h);
+      fields.push({ key:'_metaFields', metaKey:h, type: isTA ? 'meta-textarea' : 'meta-text', label:h });
+    }
+  }
+  return fields;
 };
 const resolveIssueUser = (bug, users, idKey, metadataLabels) => {
   const user = bug?.[idKey] ? users.find(u => u.id === bug[idKey]) : null;
@@ -108,7 +233,7 @@ const summarizeBugs = bugs => ({
   total: bugs.length,
   openCount: bugs.filter(b => b.status !== 'Done').length,
   doneCount: bugs.filter(b => b.status === 'Done').length,
-  byPriority: ['Critical','High','Medium','Low'].reduce((acc, label) => ({ ...acc, [label]: bugs.filter(b => b.priority === label).length }), {}),
+  byPriority: ['P0','P1','P2','P3'].reduce((acc, label) => ({ ...acc, [label]: bugs.filter(b => b.priority === label).length }), {}),
   byStatus: ['To Do','In Progress','In Review','Done'].reduce((acc, label) => ({ ...acc, [label]: bugs.filter(b => b.status === label).length }), {}),
 });
 const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) => {
@@ -121,7 +246,7 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
         <td class="issuekey"><a class="issue-link" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bug.key || '')}</a></td>
         <td class="summary"><p>${escapeHtml(bug.title)}</p></td>
         <td class="created">${escapeHtml(formatIssueCreatedDate(bug))}</td>
-        <td class="priority">${escapeHtml(bug.priority || 'Medium')}</td>
+        <td class="priority">${escapeHtml(bug.priority || 'P2')}</td>
         <td class="assignee">${escapeHtml(assignee?.name || 'Unassigned')}</td>
         <td class="status">${escapeHtml(bug.status || 'To Do')}</td>
       </tr>
@@ -175,7 +300,7 @@ const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) =>
       <td><strong>Total</strong><br>${stats.total}</td>
       <td><strong>Open</strong><br>${stats.openCount}</td>
       <td><strong>Done</strong><br>${stats.doneCount}</td>
-      <td><strong>Critical</strong><br>${stats.byPriority?.Critical || 0}</td>
+      <td><strong>P0</strong><br>${stats.byPriority?.P0 || 0}</td>
       <td><strong>Project Key</strong><br>${escapeHtml(project.key || '-')}</td>
       <td><strong>Generated For</strong><br>${escapeHtml(project.name)}</td>
     </tr>
@@ -211,28 +336,147 @@ const APPS_SCRIPT_SNIPPET = `function doPost(e) {
   try {
     const p = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const TYPE_COLORS = {'Bug':'#ea4335','Feature':'#34a853','Task':'#4285f4','Improvement':'#9c27b0','New Issue':'#34a853','Regression':'#d93025','Enhancement':'#ff9800','Defect':'#f44336'};
+    const STATUS_COLORS = {'To Do':'#9e9e9e','In Progress':'#1a73e8','In Review':'#e37400','Done':'#1e8e3e'};
+    const PRIORITY_COLORS = {'P0':'#d93025','P1':'#e37400','P2':'#f9ab00','P3':'#1e8e3e'};
+    const TYPE_OPTIONS = ['Bug','Feature','Task','Improvement','New Issue','Regression','Enhancement','Defect'];
+    const STATUS_OPTIONS = ['To Do','In Progress','In Review','Done'];
+    const PRIORITY_OPTIONS = ['P0','P1','P2','P3'];
+    const BROWSER_OPTIONS = ['Chrome','Firefox','Safari','MS Edge','App'];
+    const ENVIRONMENT_OPTIONS = ['Dev','Stage','Prod','Upcoming-Stage'];
+    const RETAIL_TYPE_OPTIONS = ['Grocery','Restaurant','Grocery / Restaurant'];
+    const LOCATION_TYPE_OPTIONS = ['QSR','FINE DINE-IN','Grocery','Grocery / Restaurant','FINE DINE-IN / QSR'];
+    const DEVELOPER_OPTIONS = Array.isArray(p.developerOptions) && p.developerOptions.length ? p.developerOptions : null;
     for (const t of p.sheets) {
       let sh = ss.getSheetByName(t.name) || ss.insertSheet(t.name);
       const headers = t.headers || [];
       const rows = t.rows || [];
-
+      const typeCol = headers.indexOf('Issue Type') + 1;
+      const statusCol = headers.indexOf('Status') + 1;
+      const priorityCol = headers.indexOf('Priority') + 1;
+      const assigneeCol = headers.indexOf('Assignee') + 1;
+      const raisedByCol = headers.indexOf('Raised By') + 1;
+      const browserCol = headers.indexOf('Browser') + 1;
+      const environmentCol = headers.indexOf('Environment') + 1;
+      const retailTypeCol = headers.indexOf('Retail Type') + 1;
+      const locationTypeCol = Math.max(headers.indexOf('Location Type'), headers.indexOf('Location')) + 1;
+      const syncHeaders = () => {
+        if (!headers.length) return;
+        sh.getRange(1,1,1,Math.max(sh.getMaxColumns(), headers.length)).clearContent();
+        sh.getRange(1,1,1,headers.length).setValues([headers]);
+      };
+      const applyDropdownsAndColors = () => {
+        const lastRow = sh.getLastRow();
+        if (lastRow < 2) return;
+        const n = lastRow - 1;
+        const setDropdown = (col, opts) => {
+          if (col < 1) return;
+          sh.getRange(2, col, n, 1).setDataValidation(
+            SpreadsheetApp.newDataValidation().requireValueInList(opts, true).setAllowInvalid(true).build()
+          );
+        };
+        const colorCol = (col, map) => {
+          if (col < 1) return;
+          const vals = sh.getRange(2, col, n, 1).getValues();
+          sh.getRange(2, col, n, 1)
+            .setBackgrounds(vals.map(([v]) => [map[v] || '#f1f3f4']))
+            .setFontColors(vals.map(([v]) => [map[v] ? '#ffffff' : '#333333']))
+            .setHorizontalAlignment('center')
+            .setFontWeight('bold');
+        };
+        setDropdown(typeCol, TYPE_OPTIONS);
+        setDropdown(statusCol, STATUS_OPTIONS);
+        setDropdown(priorityCol, PRIORITY_OPTIONS);
+        setDropdown(browserCol, BROWSER_OPTIONS);
+        setDropdown(environmentCol, ENVIRONMENT_OPTIONS);
+        setDropdown(retailTypeCol, RETAIL_TYPE_OPTIONS);
+        setDropdown(locationTypeCol, LOCATION_TYPE_OPTIONS);
+        if (DEVELOPER_OPTIONS) { setDropdown(assigneeCol, DEVELOPER_OPTIONS); setDropdown(raisedByCol, DEVELOPER_OPTIONS); }
+        colorCol(typeCol, TYPE_COLORS);
+        colorCol(statusCol, STATUS_COLORS);
+        colorCol(priorityCol, PRIORITY_COLORS);
+      };
       if (p.action === 'add_tab') {
-        if (sh.getLastRow() === 0 && headers.length) {
-          sh.getRange(1,1,1,headers.length).setValues([headers]);
-        }
+        syncHeaders();
       } else if (p.action === 'append') {
-        if (sh.getLastRow() === 0 && headers.length) {
-          sh.getRange(1,1,1,headers.length).setValues([headers]);
-        }
-        if (rows.length) {
-          sh.getRange(sh.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+        if (!headers.length) continue;
+        // Read the sheet's existing column order so we never overwrite it
+        const lastCol = sh.getLastColumn();
+        const sheetHeaders = lastCol > 0
+          ? sh.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim())
+          : [];
+        const hasExistingHeaders = sheetHeaders.some(Boolean);
+        if (!hasExistingHeaders) {
+          // New / empty tab — write headers then data
+          sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+          if (rows.length) {
+            sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
+            applyDropdownsAndColors();
+          }
+        } else if (rows.length) {
+          // Normalize header name — S.No variants all map to the same key
+          const normH = h => {
+            const s = String(h || '').trim().toLowerCase().replace(/\s+/g, '');
+            if (/^(s\.?no\.?|sr\.?no\.?|serialno\.?|no\.|#)$/.test(s)) return '__sno__';
+            return s;
+          };
+          // Remap each incoming row to the sheet's existing column order
+          const colCount = sheetHeaders.length;
+          const remappedRows = rows.map(row =>
+            sheetHeaders.map(h => {
+              const idx = headers.findIndex(ih => normH(ih) === normH(h));
+              return idx >= 0 && row[idx] !== undefined ? row[idx] : '';
+            })
+          );
+          const startRow = Math.max(sh.getLastRow(), 1) + 1;
+          sh.getRange(startRow, 1, remappedRows.length, colCount).setValues(remappedRows);
+          // Recompute col indices from the actual sheet headers for coloring
+          const eTypeCol = sheetHeaders.indexOf('Issue Type') + 1;
+          const eStatusCol = sheetHeaders.indexOf('Status') + 1;
+          const ePriorityCol = sheetHeaders.indexOf('Priority') + 1;
+          const eAssigneeCol = sheetHeaders.indexOf('Assignee') + 1;
+          const eRaisedByCol = sheetHeaders.indexOf('Raised By') + 1;
+          const eBrowserCol = sheetHeaders.indexOf('Browser') + 1;
+          const eEnvironmentCol = sheetHeaders.indexOf('Environment') + 1;
+          const eRetailTypeCol = sheetHeaders.indexOf('Retail Type') + 1;
+          const eLocationTypeCol = Math.max(sheetHeaders.indexOf('Location Type'), sheetHeaders.indexOf('Location')) + 1;
+          const lastRow = sh.getLastRow();
+          if (lastRow >= 2) {
+            const n = lastRow - 1;
+            const setDropdown = (col, opts) => {
+              if (col < 1) return;
+              sh.getRange(2, col, n, 1).setDataValidation(
+                SpreadsheetApp.newDataValidation().requireValueInList(opts, true).setAllowInvalid(true).build()
+              );
+            };
+            const colorCol2 = (col, map) => {
+              if (col < 1) return;
+              const vals = sh.getRange(2, col, n, 1).getValues();
+              sh.getRange(2, col, n, 1)
+                .setBackgrounds(vals.map(([v]) => [map[v] || '#f1f3f4']))
+                .setFontColors(vals.map(([v]) => [map[v] ? '#ffffff' : '#333333']))
+                .setHorizontalAlignment('center')
+                .setFontWeight('bold');
+            };
+            setDropdown(eTypeCol, TYPE_OPTIONS);
+            setDropdown(eStatusCol, STATUS_OPTIONS);
+            setDropdown(ePriorityCol, PRIORITY_OPTIONS);
+            setDropdown(eBrowserCol, BROWSER_OPTIONS);
+            setDropdown(eEnvironmentCol, ENVIRONMENT_OPTIONS);
+            setDropdown(eRetailTypeCol, RETAIL_TYPE_OPTIONS);
+            setDropdown(eLocationTypeCol, LOCATION_TYPE_OPTIONS);
+            if (DEVELOPER_OPTIONS) { setDropdown(eAssigneeCol, DEVELOPER_OPTIONS); setDropdown(eRaisedByCol, DEVELOPER_OPTIONS); }
+            colorCol2(eTypeCol, TYPE_COLORS);
+            colorCol2(eStatusCol, STATUS_COLORS);
+            colorCol2(ePriorityCol, PRIORITY_COLORS);
+          }
         }
       } else {
         const allRows = rows.length ? [headers, ...rows] : [headers];
         sh.clearContents();
         sh.getRange(1,1,allRows.length,headers.length).setValues(allRows);
+        applyDropdownsAndColors();
       }
-
       if (headers.length) {
         sh.getRange(1,1,1,headers.length)
           .setFontWeight('bold')
@@ -500,7 +744,6 @@ function IssueTable({ bugs, users, projects, currentProject, onSelectBug, emptyT
             <th>Assignee</th>
             <th>Priority</th>
             <th>Status</th>
-            <th>Last Updated</th>
           </tr>
         </thead>
         <tbody>
@@ -518,7 +761,6 @@ function IssueTable({ bugs, users, projects, currentProject, onSelectBug, emptyT
                 <td>{assignee ? <div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs" /><span style={{fontSize:12}}>{assignee.name}</span></div> : <span className="text-muted text-sm">Unassigned</span>}</td>
                 <td><PriorityBadge p={bug.priority} /></td>
                 <td><StatusBadge s={bug.status} /></td>
-                <td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td>
               </tr>
             );
           })}
@@ -551,7 +793,7 @@ function ExportReportFiltersModal({ visible, onClose, currentProject, projects, 
         </div>
         <div className="form-row">
           <div className="form-group"><label className="form-label">Assignee</label><select className="form-select" value={exportFilters.assigneeId} onChange={e => setExportFilter('assigneeId', e.target.value)}><option value="">All Assignees</option>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
-          <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={exportFilters.priority} onChange={e => setExportFilter('priority', e.target.value)}><option value="">All Priorities</option>{['Critical','High','Medium','Low'].map(p => <option key={p} value={p}>{p}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={exportFilters.priority} onChange={e => setExportFilter('priority', e.target.value)}><option value="">All Priorities</option>{['P0','P1','P2','P3'].map(p => <option key={p} value={p}>{p}</option>)}</select></div>
         </div>
         <div className="form-row">
           <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={exportFilters.status} onChange={e => setExportFilter('status', e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s => <option key={s} value={s}>{s}</option>)}</select></div>
@@ -652,6 +894,20 @@ function Avatar({ user, size='' }) {
 function PriorityBadge({ p }) { return <span className={`badge ${priorityBadge(p)}`}>{priorityIcon(p)} {p}</span>; }
 function StatusBadge({ s })   { return <span className={`badge ${statusBadge(s)}`}>{statusIcon(s)} {s}</span>; }
 function TypeBadge({ t })     { return <span className={`badge ${typeBadge(t)}`}>{typeIcon(t)} {t}</span>; }
+function BadgeSelect({ value, onChange, options, badgeFn, iconFn }) {
+  const cls = badgeFn(value);
+  const { bg, fg } = BADGE_COLORS[cls] || {};
+  return (
+    <select
+      className="form-select"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      style={{ background: bg || '', color: fg || '', fontWeight: 600, borderColor: fg ? `${fg}55` : '' }}
+    >
+      {options.map(opt => <option key={opt} value={opt}>{iconFn ? `${iconFn(opt)} ${opt}` : opt}</option>)}
+    </select>
+  );
+}
 function BrandLogo({ src=BRAND_LOGO, size=48, rounded=12, style={} }) {
   return (
     <img
@@ -943,12 +1199,30 @@ function AuthPage({ onAuth }) {
 }
 
 // ── BugModal ──────────────────────────────────────────────────────────────────
-function BugModal({ bug, projects, users, currentProject, onClose, onSave, toast }) {
+function BugModal({ bug, projects, users, currentProject, currentUser, setProjects, onClose, onSave, toast }) {
   const editing = !!bug;
-  const [form, setForm] = useState({ title:bug?.title||'', description:bug?.description||'', projectId:bug?.projectId||currentProject?.id||projects[0]?.id||'', type:bug?.type||'Bug', priority:bug?.priority||'Medium', assigneeId:bug?.assigneeId||'', labels:bug?.labels?.join(', ')||'', attachments:bug?.attachments||[], referenceLink:bug?.referenceLink||'', curlCommand:bug?.curlCommand||'' });
+  const initMetaFields = (proj) => {
+    if (!Array.isArray(proj?.sheetHeaders) || proj.sheetHeaders.length === 0) return {};
+    return Object.fromEntries(
+      proj.sheetHeaders
+        .filter(h => !AUTO_SKIP_HEADERS.has(h) && !SHEET_FORM_FIELD_MAP.hasOwnProperty(h))
+        .map(h => [h, getMetadataValue(bug?.description, h)])
+    );
+  };
+  const initialProject = bug ? projects.find(p => p.id === bug.projectId) : (currentProject || projects[0]);
+  const [form, setForm] = useState({ title:bug?.title||'', description:extractFreeDescription(bug?.description), projectId:bug?.projectId||currentProject?.id||projects[0]?.id||'', type:bug?.type||'Bug', priority:bug?.priority||'P2', status:bug?.status||'To Do', assigneeId:bug?.assigneeId||'', labels:bug?.labels?.join(', ')||'', attachments:bug?.attachments||[], referenceLink:bug?.referenceLink||'', curlCommand:bug?.curlCommand||'', customFields:bug?.customFields||{}, _metaFields:initMetaFields(initialProject), _application:getMetadataValue(bug?.description,'Application'), _os:getMetadataValue(bug?.description,'Operating System'), _browser:getMetadataValue(bug?.description,'Browser'), _environment:getMetadataValue(bug?.description,'Environment'), _retailType:getMetadataValue(bug?.description,'Retail Type'), _locationType:getMetadataValue(bug?.description,'Location Type'), _module:getMetadataValue(bug?.description,'Module'), _feature:getMetadataValue(bug?.description,'Feature'), _devComments:getMetadataValue(bug?.description,'Developer Comments'), _qaComments:getMetadataValue(bug?.description,'QA Comments'), _sprint:getMetadataValue(bug?.description,'Sprint') });
   const [projectPermissions, setProjectPermissions] = useState(new Set());
   const [showCurl, setShowCurl] = useState(!!bug?.curlCommand);
+  const selectedProject = projects.find(project => project.id === form.projectId) || null;
+  const activeCustomFields = isCompactSheetProject(selectedProject) ? getProjectCustomFields(selectedProject) : [];
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const setMeta=(k,v)=>setForm(f=>({...f,_metaFields:{...(f._metaFields||{}),[k]:v}}));
+  // When project changes, re-init _metaFields for the new project's headers (create flow only)
+  useEffect(() => {
+    if (editing) return;
+    const proj = projects.find(p => p.id === form.projectId);
+    setForm(f => ({...f, _metaFields: initMetaFields(proj)}));
+  }, [form.projectId]);
   useEffect(()=>{
     if (!form.projectId) { setProjectPermissions(new Set()); return; }
     api.get(`/api/rbac/me/permissions?projectId=${form.projectId}`)
@@ -957,7 +1231,12 @@ function BugModal({ bug, projects, users, currentProject, onClose, onSave, toast
   },[form.projectId]);
   const handleSubmit = async e => {
     e.preventDefault(); if (!form.title.trim()) return;
-    const payload={...form, labels:form.labels?form.labels.split(',').map(l=>l.trim()).filter(Boolean):[], referenceLink:(form.referenceLink||'').trim(), curlCommand:(form.curlCommand||'').trim()};
+    const missingRequiredField = activeCustomFields.find(field => field.required && !String(form.customFields?.[field.id] || '').trim());
+    if (missingRequiredField) { toast(`${missingRequiredField.label} is required`, 'error'); return; }
+    const finalDescription = !isCompactSheetProject(selectedProject)
+      ? buildLegacyDescription(form.description, { 'Application':form._application, 'Operating System':form._os, 'Browser':form._browser, 'Environment':form._environment, 'Retail Type':form._retailType, 'Location Type':form._locationType, 'Module':form._module, 'Feature':form._feature, 'Developer Comments':form._devComments, 'QA Comments':form._qaComments, 'Sprint':form._sprint, ...(form._metaFields||{}) })
+      : form.description;
+    const payload={...form, description:finalDescription, labels:form.labels?form.labels.split(',').map(l=>l.trim()).filter(Boolean):[], referenceLink:(form.referenceLink||'').trim(), curlCommand:(form.curlCommand||'').trim()};
     if (!projectPermissions.has('ASSIGN_ISSUE')) {
       delete payload.assigneeId;
     }
@@ -988,16 +1267,39 @@ function BugModal({ bug, projects, users, currentProject, onClose, onSave, toast
       <div className="modal-header"><h2 className="modal-title">{editing?'Edit Issue':'Create Issue'}</h2><button className="btn-icon" onClick={onClose}>✕</button></div>
       <form onSubmit={handleSubmit}>
         <div className="modal-body">
-          <div className="form-group"><label className="form-label">Title *</label><input className="form-input" value={form.title} onChange={e=>set('title',e.target.value)} placeholder="Brief description of the issue" required autoFocus /></div>
-          <div className="form-group"><label className="form-label">Description</label><textarea className="form-textarea" value={form.description} onChange={e=>set('description',e.target.value)} placeholder="Detailed description, steps to reproduce…" /></div>
-          <div className="form-row">
-            <div className="form-group"><label className="form-label">Project</label><select className="form-select" value={form.projectId} onChange={e=>set('projectId',e.target.value)}>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-            <div className="form-group"><label className="form-label">Type</label><select className="form-select" value={form.type} onChange={e=>set('type',e.target.value)}>{['Bug','Feature','Task','Improvement'].map(t=><option key={t}>{t}</option>)}</select></div>
-          </div>
-          <div className="form-row">
-            <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={form.priority} onChange={e=>set('priority',e.target.value)}>{['Critical','High','Medium','Low'].map(p=><option key={p}>{p}</option>)}</select></div>
-            <div className="form-group"><label className="form-label">Assignee</label><select className="form-select" value={form.assigneeId} onChange={e=>set('assigneeId',e.target.value)} disabled={!projectPermissions.has('ASSIGN_ISSUE')}><option value="">Unassigned</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>{!projectPermissions.has('ASSIGN_ISSUE')&&<div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>You do not have permission to assign issues in this project.</div>}</div>
-          </div>
+          {(() => {
+            const sheetFields = getSheetFormFields(selectedProject, isCompactSheetProject(selectedProject) ? activeCustomFields : undefined);
+            const renderFieldInput = field => {
+              if (field.type === 'badge-select') return <BadgeSelect value={form[field.key]||''} onChange={v=>set(field.key,v)} options={field.options} badgeFn={field.badgeFn} iconFn={field.iconFn} />;
+              if (field.type === 'user-select') return <><select className="form-select" value={form.assigneeId} onChange={e=>set('assigneeId',e.target.value)} disabled={!projectPermissions.has('ASSIGN_ISSUE')}><option value="">Unassigned</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>{!projectPermissions.has('ASSIGN_ISSUE')&&<div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>You do not have permission to assign issues in this project.</div>}</>;
+              if (field.type === 'select') return <select className="form-select" value={form[field.key]||''} onChange={e=>set(field.key,e.target.value)}>{(field.options||[]).map(o=><option key={o} value={o}>{o||`Select ${field.label}`}</option>)}</select>;
+              if (field.type === 'textarea') return <textarea className="form-textarea" value={form[field.key]||''} onChange={e=>set(field.key,e.target.value)} placeholder={field.label} style={{minHeight:80}} />;
+              if (field.type === 'meta-textarea') return <textarea className="form-textarea" value={form._metaFields?.[field.metaKey]||''} onChange={e=>setMeta(field.metaKey,e.target.value)} placeholder={field.label} style={{minHeight:80}} />;
+              if (field.type === 'meta-text') return <input className="form-input" value={form._metaFields?.[field.metaKey]||''} onChange={e=>setMeta(field.metaKey,e.target.value)} placeholder={field.label} />;
+              if (field.type === 'custom') return <CustomFieldInput field={field.field} value={form.customFields?.[field.field.id]||''} onChange={v=>set('customFields',{...(form.customFields||{}),[field.field.id]:v})} />;
+              return <input className="form-input" value={form[field.key]||''} onChange={e=>set(field.key,e.target.value)} placeholder={field.label} />;
+            };
+            const rows = [];
+            let i = 0;
+            while (i < sheetFields.length) {
+              const f = sheetFields[i], n = sheetFields[i+1];
+              if (f.type === 'badge-select' && n?.type === 'badge-select') {
+                rows.push(<div key={i} className="form-row"><div className="form-group"><label className="form-label">{f.label}</label>{renderFieldInput(f)}</div><div className="form-group"><label className="form-label">{n.label}</label>{renderFieldInput(n)}</div></div>);
+                i += 2;
+              } else {
+                rows.push(<div key={i} className="form-group"><label className="form-label">{f.label}{f.required?' *':''}</label>{renderFieldInput(f)}</div>);
+                i++;
+              }
+            }
+            return (
+              <>
+                <div className="form-group"><label className="form-label">Project</label><select className="form-select" value={form.projectId} onChange={e=>set('projectId',e.target.value)}>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                <div className="form-group"><label className="form-label">{isCompactSheetProject(selectedProject)?'Issue Title':'Issue Description'} *</label><input className="form-input" value={form.title} onChange={e=>set('title',e.target.value)} placeholder="Brief description of the issue" required autoFocus /></div>
+                <div className="form-group"><label className="form-label">Description</label><textarea className="form-textarea" value={form.description} onChange={e=>set('description',e.target.value)} placeholder="Detailed description, steps to reproduce…" /></div>
+                {rows}
+              </>
+            );
+          })()}
           <div className="form-group"><label className="form-label">Labels (comma separated)</label><input className="form-input" value={form.labels} onChange={e=>set('labels',e.target.value)} placeholder="e.g. frontend, auth, critical" /></div>
           <div className="form-group"><label className="form-label">Reference Link</label><input className="form-input" value={form.referenceLink} onChange={e=>set('referenceLink',e.target.value)} placeholder="https://example.com/ticket-or-doc" /></div>
           <div className="form-group">
@@ -1085,7 +1387,7 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
   const assignee=bug?resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']):null;
   const reporter=bug?resolveIssueUser(bug,users,'reporterId','Raised By'):null;
   if (!bug) return <Modal onClose={onClose}><div className="modal-body" style={{minHeight:200,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--muted)'}}>Loading…</div></Modal>;
-  if (editing) return <BugModal bug={bug} projects={projects} users={users} onClose={()=>setEditing(false)} onSave={b=>{setBug(b);onUpdate(b);setEditing(false);}} toast={toast} />;
+  if (editing) return <BugModal bug={bug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setEditing(false)} onSave={b=>{setBug(b);onUpdate(b);setEditing(false);}} toast={toast} />;
   return (
     <Modal onClose={onClose} large>
       <div className="modal-header" style={{marginBottom:0}}>
@@ -1102,7 +1404,18 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
       <div className="modal-body">
         <div className="detail-layout">
           <div className="detail-main">
-            <div className="detail-section"><h4>Description</h4>{bug.description?<div className="detail-description">{bug.description}</div>:<div className="detail-description" style={{color:'var(--muted)',fontStyle:'italic'}}>No description provided.</div>}</div>
+            <div className="detail-section"><h4>Description</h4>{extractFreeDescription(bug.description)?<div className="detail-description">{extractFreeDescription(bug.description)}</div>:<div className="detail-description" style={{color:'var(--muted)',fontStyle:'italic'}}>No description provided.</div>}</div>
+            {!isCompactSheetProject(project)&&(()=>{
+              // Show textarea-type fields from the project's sheet headers if available
+              const commentHeaders = (Array.isArray(project?.sheetHeaders) && project.sheetHeaders.length > 0)
+                ? project.sheetHeaders.filter(h => /comment|notes|remark|step|feedback/i.test(h) && !AUTO_SKIP_HEADERS.has(h))
+                : ['Dev Comments','QA Comments'];
+              const metaKeyOf = h => { const m = SHEET_FORM_FIELD_MAP[h]; return m?.metaKey || (m?.key?.startsWith('_') ? h : h); };
+              return commentHeaders.map(h => {
+                const val = getMetadataValue(bug.description, metaKeyOf(h) === h ? h : metaKeyOf(h));
+                return val ? <div key={h} className="detail-section"><h4>{h}</h4><div className="detail-description">{val}</div></div> : null;
+              });
+            })()}
             {bug.labels?.length>0&&<div className="detail-section"><h4>Labels</h4><div className="flex gap-1 flex-wrap">{bug.labels.map(l=><span key={l} className="label-chip">{l}</span>)}</div></div>}
             {bug.referenceLink&&<div className="detail-section"><h4>Reference Link</h4><a href={bug.referenceLink} target="_blank" rel="noreferrer" style={{color:'var(--primary)',wordBreak:'break-all'}}>{bug.referenceLink}</a></div>}
             {bug.attachments?.length>0&&<div className="detail-section"><h4>Attachments</h4><div style={{display:'grid',gap:12}}>
@@ -1135,15 +1448,29 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
           </div>
           <div className="detail-sidebar">
             <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16}}>
-              <div className="detail-field"><div className="detail-field-label">Status</div><select className="form-select" value={bug.status} onChange={e=>updateField('status',e.target.value)}>{['To Do','In Progress','In Review','Done'].map(s=><option key={s}>{s}</option>)}</select></div>
-              <div className="detail-field"><div className="detail-field-label">Priority</div><select className="form-select" value={bug.priority} onChange={e=>updateField('priority',e.target.value)}>{['Critical','High','Medium','Low'].map(p=><option key={p}>{p}</option>)}</select></div>
+              <div className="detail-field"><div className="detail-field-label">Issue Type</div><BadgeSelect value={bug.type||'Bug'} onChange={v=>updateField('type',v)} options={['Bug','Feature','Task','Improvement']} badgeFn={typeBadge} iconFn={typeIcon} /></div>
+              <div className="detail-field"><div className="detail-field-label">Status</div><BadgeSelect value={bug.status||'To Do'} onChange={v=>updateField('status',v)} options={['To Do','In Progress','In Review','Done']} badgeFn={statusBadge} iconFn={statusIcon} /></div>
+              <div className="detail-field"><div className="detail-field-label">Priority</div><BadgeSelect value={bug.priority||'P2'} onChange={v=>updateField('priority',v)} options={['P0','P1','P2','P3']} badgeFn={priorityBadge} iconFn={priorityIcon} /></div>
               <div className="detail-field"><div className="detail-field-label">Assignee</div><select className="form-select" value={bug.assigneeId||''} onChange={e=>updateField('assigneeId',e.target.value)} disabled={!projectPermissions.has('ASSIGN_ISSUE')}><option value="">Unassigned</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>{!projectPermissions.has('ASSIGN_ISSUE')&&<div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>You do not have permission to reassign this issue.</div>}</div>
+              {!isCompactSheetProject(project)&&(()=>{
+                // Use stored sheet headers if available; fall back to known fields
+                const sidebarHeaders = (Array.isArray(project?.sheetHeaders) && project.sheetHeaders.length > 0)
+                  ? project.sheetHeaders.filter(h => !AUTO_SKIP_HEADERS.has(h) && SHEET_FORM_FIELD_MAP[h] !== null && !['Issue Description','Issue Title','Issue Type','Status','Priority','Assignee','Dev Comments','QA Comments'].includes(h))
+                  : [['Application','Application'],['OS - Operating System','Operating System'],['Browser','Browser'],['Environment','Environment'],['Retail Type','Retail Type'],['Location Type','Location Type'],['Module','Module'],['Feature','Feature'],['Sprint','Sprint']].map(([l])=>l);
+                return sidebarHeaders.map(h => {
+                  const mapped = SHEET_FORM_FIELD_MAP[h];
+                  const metaKey = mapped?.metaKey || mapped?.key?.startsWith('_') ? (mapped.metaKey || h) : h;
+                  const val = getMetadataValue(bug.description, metaKey);
+                  return val ? <div key={h} className="detail-field"><div className="detail-field-label">{h}</div><div className="detail-field-value text-sm">{val}</div></div> : null;
+                });
+              })()}
+              {isCompactSheetProject(project)&&getProjectCustomFields(project).map(field=><div key={field.id} className="detail-field"><div className="detail-field-label">{field.label}</div><div className="detail-field-value text-sm text-muted">{getCustomFieldValue(bug,field)||'—'}</div></div>)}
               <hr className="divider"/>
               <div className="detail-field"><div className="detail-field-label">Project</div><div className="detail-field-value" style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:10,height:10,borderRadius:'50%',background:project?.color}}/>{project?.name}</div></div>
               <div className="detail-field"><div className="detail-field-label">Reporter</div><div className="detail-field-value" style={{display:'flex',alignItems:'center',gap:6}}>{reporter?<><Avatar user={reporter} size="xs"/>{reporter.name}</>:'Unknown'}</div></div>
               <hr className="divider"/>
               <div className="detail-field"><div className="detail-field-label">Created</div><div className="detail-field-value text-sm text-muted">{formatIssueCreatedDate(bug)}</div></div>
-              <div className="detail-field"><div className="detail-field-label">Updated</div><div className="detail-field-value text-sm text-muted">{timeAgo(bug.updatedAt)}</div></div>
+              <div className="detail-field"><div className="detail-field-label">Last Status Change</div><div className="detail-field-value text-sm text-muted">{timeAgo(getIssueLastStatusChangeDate(bug))}</div></div>
             </div>
           </div>
         </div>
@@ -1183,7 +1510,7 @@ function DashboardLegacy({ projects, users, currentProject, onNavigate, currentU
     <div>
       <div className="page-header"><div><h1>Dashboard</h1><p>{currentProject?currentProject.name:'All Projects'} · Overview</p></div><div style={{display:'flex',gap:10,flexWrap:'wrap'}}><button className="btn btn-ghost" onClick={openExportModal}>Export Report</button><button className="btn btn-primary" onClick={()=>onNavigate('list')}>View All Issues →</button></div></div>
       <div className="stats-grid">
-        {[{label:'Total Issues',value:stats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:stats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:stats.doneCount,sub:'marked as done',color:'#10b981'},{label:'Critical',value:stats.byPriority.Critical,sub:'critical priority',color:'#ef4444'}].map(card=>(
+        {[{label:'Total Issues',value:stats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:stats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:stats.doneCount,sub:'marked as done',color:'#10b981'},{label:'P0',value:stats.byPriority.P0,sub:'critical priority',color:'#ef4444'}].map(card=>(
           <div key={card.label} className="stat-card"><div className="label">{card.label}</div><div className="value" style={{color:card.color}}>{card.value}</div><div className="sub">{card.sub}</div></div>
         ))}
       </div>
@@ -1198,8 +1525,8 @@ function DashboardLegacy({ projects, users, currentProject, onNavigate, currentU
           <SyncTimestamp toast={toast} />
         </div>
         {recentBugs.length===0?<div className="text-muted text-sm">No issues found.</div>:(
-          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th>{!currentProject&&<th>Project Name</th>}<th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
-          <tbody>{recentBugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td>{!currentProject&&<td><span className="text-muted text-sm">{project?.name||'—'}</span></td>}<td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
+          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th>{!currentProject&&<th>Project Name</th>}<th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th></tr></thead>
+          <tbody>{recentBugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td>{!currentProject&&<td><span className="text-muted text-sm">{project?.name||'—'}</span></td>}<td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted">—</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted">—</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td></tr>);})}</tbody></table></div>
         )}
       </div>
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={async()=>{ const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }} onDelete={async(id)=>{ setRecentBugs(bs=>bs.filter(b=>b.id!==id)); setSelectedBug(null); const url=currentProject?`/api/stats?projectId=${currentProject.id}`:'/api/stats'; const bu=currentProject?`/api/bugs?projectId=${currentProject.id}`:'/api/bugs'; const [nextStats, nextBugs] = await Promise.all([api.get(url), api.get(bu)]); setStats(nextStats); setRecentBugs(nextBugs.slice(0,5)); }}/>}
@@ -1222,7 +1549,7 @@ function DashboardLegacy({ projects, users, currentProject, onNavigate, currentU
             </div>
             <div className="form-row">
               <div className="form-group"><label className="form-label">Assignee</label><select className="form-select" value={exportFilters.assigneeId} onChange={e=>setExportFilter('assigneeId',e.target.value)}><option value="">All Assignees</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
-              <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={exportFilters.priority} onChange={e=>setExportFilter('priority',e.target.value)}><option value="">All Priorities</option>{['Critical','High','Medium','Low'].map(p=><option key={p} value={p}>{p}</option>)}</select></div>
+              <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={exportFilters.priority} onChange={e=>setExportFilter('priority',e.target.value)}><option value="">All Priorities</option>{['P0','P1','P2','P3'].map(p=><option key={p} value={p}>{p}</option>)}</select></div>
             </div>
             <div className="form-row">
               <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={exportFilters.status} onChange={e=>setExportFilter('status',e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s=><option key={s} value={s}>{s}</option>)}</select></div>
@@ -1251,7 +1578,7 @@ function BugListLegacy({ projects, users, currentProject, toast, currentUser }) 
       <div className="filters-bar">
         <div style={{position:'relative'}}><span className="search-icon">🔍</span><input style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'7px 12px 7px 32px',color:'var(--text)',outline:'none',width:220}} placeholder="Search issues…" value={filters.search} onChange={e=>setFilter('search',e.target.value)}/></div>
         <select className="filter-select" value={filters.status} onChange={e=>setFilter('status',e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s=><option key={s}>{s}</option>)}</select>
-        <select className="filter-select" value={filters.priority} onChange={e=>setFilter('priority',e.target.value)}><option value="">All Priorities</option>{['Critical','High','Medium','Low'].map(p=><option key={p}>{p}</option>)}</select>
+        <select className="filter-select" value={filters.priority} onChange={e=>setFilter('priority',e.target.value)}><option value="">All Priorities</option>{['P0','P1','P2','P3'].map(p=><option key={p}>{p}</option>)}</select>
         <select className="filter-select" value={filters.type} onChange={e=>setFilter('type',e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t=><option key={t}>{t}</option>)}</select>
         <select className="filter-select" value={filters.assigneeId} onChange={e=>setFilter('assigneeId',e.target.value)}><option value="">All Assignees</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>
         {Object.values(filters).some(v=>v)&&<button className="btn btn-ghost btn-sm" onClick={()=>setFilters({status:'',priority:'',type:'',assigneeId:'',search:''})}>Clear ✕</button>}
@@ -1262,14 +1589,14 @@ function BugListLegacy({ projects, users, currentProject, toast, currentUser }) 
             <div style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Recent Issues</div>
             <SyncTimestamp toast={toast} />
           </div>
-          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th>{!currentProject&&<th>Project Name</th>}<th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Last Updated</th></tr></thead>
-          <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td>{!currentProject&&<td><span className="text-muted text-sm">{project?.name||'—'}</span></td>}<td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td><td><span className="text-muted text-sm">{formatDate(bug.updatedAt)}</span></td></tr>);})}</tbody></table></div>
+          <div className="table-scroll"><table className="bug-table"><thead><tr><th>Date Created</th><th>Issue Title</th>{!currentProject&&<th>Project Name</th>}<th>Raised By</th><th>Issue Type</th><th>Assignee</th><th>Priority</th><th>Status</th></tr></thead>
+          <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);return(<tr key={`compact-${bug.id}`} onClick={()=>setSelectedBug(bug.id)}><td><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td><td><span className="issue-title">{bug.title}</span></td>{!currentProject&&<td><span className="text-muted text-sm">{project?.name||'—'}</span></td>}<td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td><TypeBadge t={bug.type}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td><PriorityBadge p={bug.priority}/></td><td><StatusBadge s={bug.status}/></td></tr>);})}</tbody></table></div>
           <div className="table-scroll" style={{display:'none'}}><table className="bug-table"><thead><tr><th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Raised By</th><th>Project</th><th>Created</th></tr></thead>
           <tbody>{bugs.map(bug=>{const assignee=resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']);const reporter=resolveIssueUser(bug,users,'reporterId','Raised By');const project=projects.find(p=>p.id===bug.projectId);const createdAt=getIssueCreatedDate(bug);return(<tr key={bug.id} onClick={()=>setSelectedBug(bug.id)}><td><span className="issue-key">{bug.key||bug.id.slice(0,8)}</span></td><td><span className="issue-title">{bug.title}</span></td><td><TypeBadge t={bug.type}/></td><td><StatusBadge s={bug.status}/></td><td><PriorityBadge p={bug.priority}/></td><td>{assignee?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={assignee} size="xs"/><span style={{fontSize:12}}>{assignee.name}</span></div>:<span className="text-muted text-sm">Unassigned</span>}</td><td>{reporter?<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar user={reporter} size="xs"/><span style={{fontSize:12}}>{reporter.name}</span></div>:<span className="text-muted text-sm">Unknown</span>}</td><td>{project&&<div style={{display:'flex',alignItems:'center',gap:5}}><div style={{width:8,height:8,borderRadius:'50%',background:project.color}}/><span style={{fontSize:12,color:'var(--muted)'}}>{project.name}</span></div>}</td><td><span className="text-muted text-sm">{createdAt?timeAgo(createdAt):'Unavailable'}</span></td></tr>);})}</tbody></table>
           </div>
         </div>
       )}
-      {showCreate&&<BugModal projects={projects} users={users} currentProject={currentProject} onClose={()=>setShowCreate(false)} toast={toast} onSave={()=>{load();setShowCreate(false);}}/>}
+      {showCreate&&<BugModal projects={projects} users={users} currentProject={currentProject} currentUser={currentUser} onClose={()=>setShowCreate(false)} toast={toast} onSave={()=>{load();setShowCreate(false);}}/>}
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={()=>load()} onDelete={id=>{setBugs(bs=>bs.filter(b=>b.id!==id));}}/>}
     </div>
   );
@@ -1366,7 +1693,7 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
         </div>
       </div>
       <div className="stats-grid">
-        {[{label:'Total Issues',value:stats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:stats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:stats.doneCount,sub:'marked as done',color:'#10b981'},{label:'Critical',value:stats.byPriority.Critical,sub:'critical priority',color:'#ef4444'}].map(card => (
+        {[{label:'Total Issues',value:stats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:stats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:stats.doneCount,sub:'marked as done',color:'#10b981'},{label:'P0',value:stats.byPriority.P0,sub:'critical priority',color:'#ef4444'}].map(card => (
           <div key={card.label} className="stat-card"><div className="label">{card.label}</div><div className="value" style={{color:card.color}}>{card.value}</div><div className="sub">{card.sub}</div></div>
         ))}
       </div>
@@ -1403,7 +1730,124 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
   );
 }
 
-function BugList({ projects, users, currentProject, toast, currentUser, onSyncComplete }) {
+function SheetViewIssueTable({ bugs, users, project, onSelectBug, emptyText='No issues found.' }) {
+  const columns = getSheetViewColumns(project);
+  if (!bugs.length) return <div className="text-muted text-sm">{emptyText}</div>;
+  return (
+    <div className="table-scroll">
+      <table className="bug-table">
+        <thead>
+          <tr>{columns.map(column => <th key={column.key}>{column.label}</th>)}</tr>
+        </thead>
+        <tbody>
+          {bugs.map(bug => {
+            const assignee = resolveIssueUser(bug, users, 'assigneeId', ['Assignee(s)', 'Assignee From Sheet']);
+            const reporter = resolveIssueUser(bug, users, 'reporterId', 'Raised By');
+            return (
+              <tr key={`sheet-${bug.id}`} onClick={() => onSelectBug(bug.id)}>
+                {columns.map(column => {
+                  if (column.key === 'createdAt') return <td key={column.key}><span className="text-muted text-sm">{formatIssueCreatedDate(bug)}</span></td>;
+                  if (column.key === 'title') return <td key={column.key}><span className="issue-title">{bug.title}</span></td>;
+                  if (column.key === 'reporter') return <td key={column.key}>{reporter?.name || 'Unknown'}</td>;
+                  if (column.key === 'type') return <td key={column.key}><TypeBadge t={bug.type} /></td>;
+                  if (column.key === 'assignee') return <td key={column.key}>{assignee?.name || 'Unassigned'}</td>;
+                  if (column.key === 'priority') return <td key={column.key}><PriorityBadge p={bug.priority} /></td>;
+                  if (column.key === 'status') return <td key={column.key}><StatusBadge s={bug.status} /></td>;
+                  return <td key={column.key}><span className="text-muted text-sm">{getCustomFieldValue(bug, column.field) || '—'}</span></td>;
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CustomFieldInput({ field, value, onChange }) {
+  if (field.type === 'textarea') {
+    return <textarea className="form-textarea" value={value || ''} onChange={e => onChange(e.target.value)} placeholder={field.label} style={{minHeight:100}} />;
+  }
+  if (field.type === 'date') {
+    return <input className="form-input" type="date" value={value || ''} onChange={e => onChange(e.target.value)} />;
+  }
+  if (field.type === 'select') {
+    const opts = field.options || [];
+    const selectedOpt = opts.find(o => o.label === (value || ''));
+    const bg = selectedOpt?.color || '';
+    const fg = bg ? '#ffffff' : '';
+    return (
+      <select className="form-select" value={value || ''} onChange={e => onChange(e.target.value)} style={bg ? { background:bg, color:fg, fontWeight:600, borderColor:`${bg}88` } : {}}>
+        <option value="">Select {field.label}</option>
+        {opts.map(option => <option key={option.id || option.label} value={option.label}>{option.label}</option>)}
+      </select>
+    );
+  }
+  return <input className="form-input" value={value || ''} onChange={e => onChange(e.target.value)} placeholder={field.label} />;
+}
+
+function CustomFieldSchemaEditor({ fields, setFields, disabled }) {
+  const addField = () => setFields(current => [...current, { id: normalizeCustomFieldId(`field_${current.length + 1}`), label:'', type:'text', required:false, options:[] }]);
+  const updateField = (index, patch) => setFields(current => current.map((field, fieldIndex) => fieldIndex === index ? { ...field, ...patch } : field));
+  const removeField = index => setFields(current => current.filter((_, fieldIndex) => fieldIndex !== index));
+  const moveField = (fromIndex, toIndex) => setFields(current => {
+    if (toIndex < 0 || toIndex >= current.length) return current;
+    const next = [...current];
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, item);
+    return next;
+  });
+  const updateOption = (fieldIndex, optionIndex, patch) => setFields(current => current.map((field, currentFieldIndex) => {
+    if (currentFieldIndex !== fieldIndex) return field;
+    const options = [...(field.options || [])];
+    options[optionIndex] = { ...options[optionIndex], ...patch };
+    return { ...field, options };
+  }));
+  const addOption = fieldIndex => setFields(current => current.map((field, currentFieldIndex) => currentFieldIndex === fieldIndex ? { ...field, options:[...(field.options || []), { id: normalizeCustomFieldId(`${field.label || 'option'}_${Date.now()}`), label:'', color:'#94a3b8' }] } : field));
+  const removeOption = (fieldIndex, optionIndex) => setFields(current => current.map((field, currentFieldIndex) => currentFieldIndex === fieldIndex ? { ...field, options:(field.options || []).filter((_, currentOptionIndex) => currentOptionIndex !== optionIndex) } : field));
+
+  return (
+    <div style={{border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:14, background:'var(--surface2)', display:'grid', gap:12}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:12}}>
+        <div>
+          <div style={{fontWeight:600, fontSize:13}}>Sheet Fields</div>
+          <div style={{fontSize:12, color:'var(--muted)'}}>QA can add extra columns, set dropdown options, and reorder them for new projects.</div>
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={addField} disabled={disabled}>+ Add Field</button>
+      </div>
+      {fields.length === 0 && <div className="text-muted text-sm">No extra fields yet. Default sheet columns will still be used.</div>}
+      {fields.map((field, index) => (
+        <div key={field.id || index} draggable={!disabled} onDragStart={e => e.dataTransfer.setData('text/plain', String(index))} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const fromIndex = Number(e.dataTransfer.getData('text/plain')); if (Number.isFinite(fromIndex)) moveField(fromIndex, index); }} style={{border:'1px solid var(--border)', borderRadius:12, padding:12, background:'var(--surface)', display:'grid', gap:10}}>
+          <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+            <span style={{fontSize:12, color:'var(--muted)', cursor:'grab'}}>Drag</span>
+            <input className="form-input" value={field.label || ''} onChange={e => updateField(index, { label:e.target.value, id: field.id || normalizeCustomFieldId(e.target.value) })} placeholder="Field label" disabled={disabled} style={{flex:'1 1 240px'}} />
+            <select className="form-select" value={field.type || 'text'} onChange={e => updateField(index, { type:e.target.value, options:e.target.value === 'select' ? (field.options || []) : [] })} disabled={disabled} style={{maxWidth:180}}>
+              {CUSTOM_FIELD_TYPES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+            <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--muted)'}}><input type="checkbox" checked={Boolean(field.required)} onChange={e => updateField(index, { required:e.target.checked })} disabled={disabled} /> Required</label>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => moveField(index, index - 1)} disabled={disabled || index === 0}>Up</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => moveField(index, index + 1)} disabled={disabled || index === fields.length - 1}>Down</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeField(index)} disabled={disabled}>Remove</button>
+          </div>
+          {field.type === 'select' && (
+            <div style={{display:'grid', gap:8}}>
+              {(field.options || []).map((option, optionIndex) => (
+                <div key={option.id || optionIndex} style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                  <input className="form-input" value={option.label || ''} onChange={e => updateOption(index, optionIndex, { label:e.target.value })} placeholder="Option label" disabled={disabled} style={{flex:'1 1 220px'}} />
+                  <input type="color" value={option.color || '#94a3b8'} onChange={e => updateOption(index, optionIndex, { color:e.target.value })} disabled={disabled} style={{width:42, height:42, border:'1px solid var(--border)', borderRadius:10, background:'transparent'}} />
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeOption(index, optionIndex)} disabled={disabled}>Remove Option</button>
+                </div>
+              ))}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => addOption(index)} disabled={disabled}>+ Add Option</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BugList({ projects, setProjects, users, currentProject, toast, currentUser, onSyncComplete }) {
   const [bugs, setBugs] = useState([]);
   const [filters, setFilters] = useState({ status:'', priority:'', type:'', assigneeId:'', search:'' });
   const [showCreate, setShowCreate] = useState(false);
@@ -1412,14 +1856,16 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
   const [metricsStats, setMetricsStats] = useState(null);
   const [metricsChartsReady, setMetricsChartsReady] = useState(false);
   const [page, setPage] = useState(1);
+  const [viewMode, setViewMode] = useState('normal');
   const statusOptions = ['To Do','In Progress','In Review','Done'].map(value => ({ value, label: value }));
-  const priorityOptions = ['Critical','High','Medium','Low'].map(value => ({ value, label: value }));
+  const priorityOptions = ['P0','P1','P2','P3'].map(value => ({ value, label: value }));
   const typeOptions = ['Bug','Feature','Task','Improvement'].map(value => ({ value, label: value }));
   const assigneeOptions = users.map(user => ({ value: user.id, label: user.name }));
   const pageSize = 20;
   const metricsLineRef = useRef(null), metricsDoughnutRef = useRef(null), metricsBarRef = useRef(null);
   const metricsLineChart = useRef(null), metricsDoughnutChart = useRef(null), metricsBarChart = useRef(null);
   const { showExportFilters, exportFilters, setExportFilter, openExportModal, closeExportModal, resetExportFilters, exportReport } = useProjectReportExport({ currentProject, projects, users, toast });
+  useEffect(() => { if (!currentProject || !isCompactSheetProject(currentProject)) setViewMode('normal'); }, [currentProject?.id, currentProject?.sheetLayoutVersion]);
   const load = useCallback(() => {
     const params = new URLSearchParams();
     if (currentProject) params.set('projectId', currentProject.id);
@@ -1466,7 +1912,7 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
 
   return (
     <div>
-      <div className="page-header"><div><h1>Issue List</h1><p>{currentProject ? currentProject.name : 'All Projects'} - {bugs.length} issue{bugs.length!==1?'s':''}</p></div><div style={{display:'flex',gap:10}}><button className="btn btn-ghost" onClick={() => setShowMetrics(v => !v)}>{showMetrics ? 'Hide Metrics' : 'Show Metrics'}</button><button className="btn btn-ghost" onClick={openExportModal}>Export Report</button><button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ Create Issue</button></div></div>
+      <div className="page-header"><div><h1>Issue List</h1><p>{currentProject ? currentProject.name : 'All Projects'} - {bugs.length} issue{bugs.length!==1?'s':''}</p></div><div style={{display:'flex',gap:10,flexWrap:'wrap'}}>{currentProject && isCompactSheetProject(currentProject) && <div style={{display:'flex',border:'1px solid var(--border)',borderRadius:12,overflow:'hidden'}}><button className="btn btn-ghost btn-sm" style={{borderRadius:0, background:viewMode==='normal'?'var(--surface2)':'transparent'}} onClick={() => setViewMode('normal')}>Normal View</button><button className="btn btn-ghost btn-sm" style={{borderRadius:0, background:viewMode==='sheet'?'var(--surface2)':'transparent'}} onClick={() => setViewMode('sheet')}>Sheet View</button></div>}<button className="btn btn-ghost" onClick={() => setShowMetrics(v => !v)}>{showMetrics ? 'Hide Metrics' : 'Show Metrics'}</button><button className="btn btn-ghost" onClick={openExportModal}>Export Report</button><button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ Create Issue</button></div></div>
       <div className="filters-bar">
         <div style={{position:'relative'}}><span className="search-icon">🔍</span><input style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'7px 12px 7px 32px',color:'var(--text)',outline:'none',width:220}} placeholder="Search issues…" value={filters.search} onChange={e => setFilter('search', e.target.value)} /></div>
         <SearchableSelect value={filters.status} onChange={value => setFilter('status', value)} options={statusOptions} placeholder="All Statuses" width={150} />
@@ -1478,7 +1924,7 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
       {showMetrics && metricsStats && !metricsStats.error && (
         <>
           <div className="stats-grid" style={{marginBottom:20}}>
-            {[{label:'Total Issues',value:metricsStats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:metricsStats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:metricsStats.doneCount,sub:'marked as done',color:'#10b981'},{label:'Critical',value:metricsStats.byPriority.Critical,sub:'critical priority',color:'#ef4444'}].map(card => (
+            {[{label:'Total Issues',value:metricsStats.total,sub:'across all statuses',color:'#6366f1'},{label:'Open Issues',value:metricsStats.openCount,sub:'need attention',color:'#f59e0b'},{label:'Completed',value:metricsStats.doneCount,sub:'marked as done',color:'#10b981'},{label:'P0',value:metricsStats.byPriority.P0,sub:'critical priority',color:'#ef4444'}].map(card => (
               <div key={card.label} className="stat-card"><div className="label">{card.label}</div><div className="value" style={{color:card.color}}>{card.value}</div><div className="sub">{card.sub}</div></div>
             ))}
           </div>
@@ -1502,7 +1948,9 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
             <div style={{fontSize:13,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Recent Issues</div>
             <SyncTimestamp toast={toast} onSyncComplete={onSyncComplete} />
           </div>
-          <IssueTable bugs={paginatedBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />
+          {viewMode === 'sheet' && currentProject && isCompactSheetProject(currentProject)
+            ? <SheetViewIssueTable bugs={paginatedBugs} users={users} project={currentProject} onSelectBug={setSelectedBug} />
+            : <IssueTable bugs={paginatedBugs} users={users} projects={projects} currentProject={currentProject} onSelectBug={setSelectedBug} />}
           {totalPages > 1 && (
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'0 16px 16px',flexWrap:'wrap'}}>
               <div style={{fontSize:12,color:'var(--muted)'}}>
@@ -1517,7 +1965,7 @@ function BugList({ projects, users, currentProject, toast, currentUser, onSyncCo
           )}
         </div>
       )}
-      {showCreate && <BugModal projects={projects} users={users} currentProject={currentProject} onClose={() => setShowCreate(false)} toast={toast} onSave={() => { load(); setShowCreate(false); }} />}
+      {showCreate && <BugModal projects={projects} setProjects={setProjects} users={users} currentProject={currentProject} currentUser={currentUser} onClose={() => setShowCreate(false)} toast={toast} onSave={() => { load(); setShowCreate(false); }} />}
       {selectedBug && <BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={() => setSelectedBug(null)} toast={toast} onUpdate={() => load()} onDelete={async (id) => { setBugs(bs => bs.filter(b => b.id !== id)); setSelectedBug(null); await load(); }} />}
       <ExportReportFiltersModal visible={showExportFilters} onClose={closeExportModal} currentProject={currentProject} projects={projects} users={users} exportFilters={exportFilters} setExportFilter={setExportFilter} onReset={resetExportFilters} onExport={exportReport} />
     </div>
@@ -1553,21 +2001,81 @@ function KanbanBoard({ projects, users, currentProject, toast, currentUser }) {
           </div>
         ))}
       </div>
-      {showCreate&&<BugModal projects={projects} users={users} currentProject={currentProject} onClose={()=>setShowCreate(false)} toast={toast} onSave={()=>{load();setShowCreate(false);}}/>}
+      {showCreate&&<BugModal projects={projects} users={users} currentProject={currentProject} currentUser={currentUser} onClose={()=>setShowCreate(false)} toast={toast} onSave={()=>{load();setShowCreate(false);}}/>}
       {selectedBug&&<BugDetail bugId={selectedBug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setSelectedBug(null)} toast={toast} onUpdate={b=>setBugs(bs=>bs.map(x=>x.id===b.id?b:x))} onDelete={id=>setBugs(bs=>bs.filter(b=>b.id!==id))}/>}
     </div>
   );
 }
 
 // ── ProjectsPage ──────────────────────────────────────────────────────────────
+const BASE_SHEET_COLS = ['Date Created','Issue Title','Raised By','Issue Type','Assignee','Priority','Status'];
+
 function ProjectModal({ onClose, onCreate }) {
-  const [form,setForm]=useState({name:'',key:'',description:'',color:'#6366f1'});
-  const create=async e=>{e.preventDefault();if(!form.name||!form.key)return;await onCreate(form);setForm({name:'',key:'',description:'',color:'#6366f1'});};
+  const [form, setForm] = useState({name:'',key:'',description:'',color:'#6366f1'});
+  const [cols, setCols] = useState(() => BASE_SHEET_COLS.map(label => ({ label, isBase: true })));
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dropIdx, setDropIdx] = useState(null);
+
+  const addCol = () => setCols(prev => [...prev, { label: '', isBase: false }]);
+  const removeCol = idx => setCols(prev => prev.filter((_,i) => i !== idx));
+  const updateCol = (idx, val) => setCols(prev => prev.map((c,i) => i === idx ? { ...c, label: val } : c));
+  const moveCol = (from, to) => {
+    if (from === to || to < 0 || to >= cols.length) return;
+    setCols(prev => {
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  };
+
+  const create = async e => {
+    e.preventDefault();
+    if (!form.name || !form.key) return;
+    const sheetHeaders = cols.map(c => c.label.trim()).filter(Boolean);
+    const customIssueFields = cols
+      .filter(c => !c.isBase && c.label.trim())
+      .map(c => ({ id: normalizeCustomFieldId(c.label.trim()), label: c.label.trim(), type:'text', required:false, options:[] }));
+    await onCreate({ ...form, customIssueFields, sheetHeaders });
+    setForm({name:'',key:'',description:'',color:'#6366f1'});
+    setCols(BASE_SHEET_COLS.map(label => ({ label, isBase: true })));
+  };
+
   return (
     <Modal onClose={onClose}>
-      <div className="modal-header"><h2 className="modal-title">New Project</h2><button className="btn-icon" onClick={onClose}>X</button></div>
+      <div className="modal-header"><h2 className="modal-title">New Project</h2><button className="btn-icon" onClick={onClose}>✕</button></div>
       <form onSubmit={create}>
-        <div className="modal-body"><div className="form-group"><label className="form-label">Project Name *</label><input className="form-input" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value,key:e.target.value.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,4)}))} required autoFocus/></div><div className="form-group"><label className="form-label">Project Key *</label><input className="form-input" value={form.key} onChange={e=>setForm(f=>({...f,key:e.target.value.toUpperCase()}))} required maxLength={6}/></div><div className="form-group"><label className="form-label">Description</label><textarea className="form-textarea" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="form-group"><label className="form-label">Colour</label><div className="color-swatches">{COLORS.map(c=><div key={c} className={`swatch ${form.color===c?'selected':''}`} style={{background:c}} onClick={()=>setForm(f=>({...f,color:c}))}/>)}</div></div></div>
+        <div className="modal-body">
+          <div className="form-group"><label className="form-label">Project Name *</label><input className="form-input" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value,key:e.target.value.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,4)}))} required autoFocus/></div>
+          <div className="form-group"><label className="form-label">Project Key *</label><input className="form-input" value={form.key} onChange={e=>setForm(f=>({...f,key:e.target.value.toUpperCase()}))} required maxLength={6}/></div>
+          <div className="form-group"><label className="form-label">Description</label><textarea className="form-textarea" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div>
+          <div className="form-group"><label className="form-label">Colour</label><div className="color-swatches">{COLORS.map(c=><div key={c} className={`swatch ${form.color===c?'selected':''}`} style={{background:c}} onClick={()=>setForm(f=>({...f,color:c}))}/>)}</div></div>
+          <div className="form-group">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <label className="form-label" style={{margin:0}}>Sheet Columns</label>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={addCol}>+ Add Column</button>
+            </div>
+            <div style={{fontSize:11,color:'var(--muted)',marginBottom:8}}>Drag to reorder. Column order matches the sheet.</div>
+            {cols.map((col,idx)=>(
+              <div
+                key={idx}
+                draggable
+                onDragStart={e=>{ e.dataTransfer.setData('text/plain', String(idx)); setDragIdx(idx); }}
+                onDragOver={e=>{ e.preventDefault(); setDropIdx(idx); }}
+                onDrop={e=>{ e.preventDefault(); moveCol(Number(e.dataTransfer.getData('text/plain')), idx); setDragIdx(null); setDropIdx(null); }}
+                onDragEnd={()=>{ setDragIdx(null); setDropIdx(null); }}
+                style={{display:'flex',gap:8,alignItems:'center',marginBottom:6,opacity:dragIdx===idx?0.4:1,borderTop:dropIdx===idx&&dragIdx!==idx?'2px solid var(--accent)':'2px solid transparent',paddingTop:2,transition:'border-color .1s'}}
+              >
+                <span style={{color:'var(--muted)',cursor:'grab',fontSize:16,lineHeight:1,userSelect:'none'}}>⠿</span>
+                {col.isBase
+                  ? <span style={{flex:1,fontSize:13,padding:'6px 10px',background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:6,color:'var(--text)'}}>{col.label}</span>
+                  : <input className="form-input" value={col.label} onChange={e=>updateCol(idx,e.target.value)} placeholder="Column header name" style={{flex:1}}/>
+                }
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>removeCol(idx)} style={{flexShrink:0}}>✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary">Create Project</button></div>
       </form>
     </Modal>
@@ -1577,9 +2085,7 @@ function ProjectModal({ onClose, onCreate }) {
 function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
   const [showCreate,setShowCreate]=useState(false);
   const [projectToDelete,setProjectToDelete]=useState(null);
-  const [form,setForm]=useState({name:'',key:'',description:'',color:'#6366f1'});
-  const colors=['#6366f1','#10b981','#f59e0b','#ef4444','#38bdf8','#ec4899','#8b5cf6','#14b8a6'];
-  const create=async e=>{e.preventDefault();if(!form.name||!form.key)return;const p=await api.post('/api/projects',form);setProjects(ps=>[...ps,p]);setForm({name:'',key:'',description:'',color:'#6366f1'});setShowCreate(false);onProjectCreated?.(p);toast('Project created','success');};
+  const handleCreate=async form=>{const p=await api.post('/api/projects',form);setProjects(ps=>[...ps,p]);setShowCreate(false);onProjectCreated?.(p);toast('Project created','success');};
   const del=async project=>{await api.delete(`/api/projects/${project.id}`);setProjects(ps=>ps.filter(p=>p.id!==project.id));setProjectToDelete(null);toast('Project deleted','info');};
   return (
     <div>
@@ -1587,7 +2093,7 @@ function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:16}}>
         {projects.map(p=>(<div key={p.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,borderTop:`3px solid ${p.color}`}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:36,height:36,borderRadius:8,background:p.color,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,color:'#fff',fontSize:14}}>{p.key}</div><div><div style={{fontWeight:600}}>{p.name}</div><div style={{fontSize:11,color:'var(--muted)'}}>{p.key}</div></div></div><button className="btn btn-danger btn-sm" onClick={()=>setProjectToDelete(p)}>Delete</button></div><div style={{fontSize:13,color:'var(--muted)',lineHeight:1.5}}>{p.description||'No description.'}</div><div style={{fontSize:11,color:'var(--muted)',marginTop:10}}>Created {new Date(p.createdAt).toLocaleDateString()}</div></div>))}
       </div>
-      {showCreate&&(<Modal onClose={()=>setShowCreate(false)}><div className="modal-header"><h2 className="modal-title">New Project</h2><button className="btn-icon" onClick={()=>setShowCreate(false)}>✕</button></div><form onSubmit={create}><div className="modal-body"><div className="form-group"><label className="form-label">Project Name *</label><input className="form-input" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value,key:e.target.value.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,4)}))} required/></div><div className="form-group"><label className="form-label">Project Key *</label><input className="form-input" value={form.key} onChange={e=>setForm(f=>({...f,key:e.target.value.toUpperCase()}))} required maxLength={6}/></div><div className="form-group"><label className="form-label">Description</label><textarea className="form-textarea" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="form-group"><label className="form-label">Colour</label><div className="color-swatches">{colors.map(c=><div key={c} className={`swatch ${form.color===c?'selected':''}`} style={{background:c}} onClick={()=>setForm(f=>({...f,color:c}))}/>)}</div></div></div><div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={()=>setShowCreate(false)}>Cancel</button><button type="submit" className="btn btn-primary">Create Project</button></div></form></Modal>)}
+      {showCreate&&<ProjectModal onClose={()=>setShowCreate(false)} onCreate={handleCreate}/>}
       {projectToDelete&&(<Modal onClose={()=>setProjectToDelete(null)}><div className="modal-header"><h2 className="modal-title">Delete Project</h2><button className="btn-icon" onClick={()=>setProjectToDelete(null)}>✕</button></div><div className="modal-body"><p style={{fontSize:14,lineHeight:1.6,color:'var(--muted)'}}>Are you sure you want to delete <strong style={{color:'var(--text)'}}>{projectToDelete.name}</strong>? This will remove the project and its issues.</p></div><div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={()=>setProjectToDelete(null)}>Cancel</button><button type="button" className="btn btn-danger" onClick={()=>del(projectToDelete)}>Delete Project</button></div></Modal>)}
     </div>
   );
@@ -1613,7 +2119,7 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
   const inProgress = memberBugs.filter(b => b.status === 'In Progress').length;
   const inReview   = memberBugs.filter(b => b.status === 'In Review').length;
   const todo       = memberBugs.filter(b => b.status === 'To Do').length;
-  const critical   = memberBugs.filter(b => b.priority === 'Critical').length;
+  const critical   = memberBugs.filter(b => b.priority === 'P0').length;
   const resolveRate = total > 0 ? Math.round((done / total) * 100) : 0;
 
   // unique assignedBy (reporter) options from this member's bugs
@@ -1638,7 +2144,7 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
   const activeFilters = [filterStatus, filterPriority, filterProject, filterAssignedBy].filter(Boolean).length;
   const clearFilters = () => { setFilterStatus(''); setFilterPriority(''); setFilterProject(''); setFilterAssignedBy(''); };
   const statusOptions = ['To Do','In Progress','In Review','Done'].map(value => ({ value, label: value }));
-  const priorityOptions = ['Critical','High','Medium','Low'].map(value => ({ value, label: value }));
+  const priorityOptions = ['P0','P1','P2','P3'].map(value => ({ value, label: value }));
   const projectOptions = projects
     .filter(project => memberBugs.some(b => b.projectId === project.id))
     .map(project => ({ value: project.id, label: project.name }));
@@ -1675,7 +2181,7 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
           { label:'In Progress',    value:inProgress,  color:'var(--primary)' },
           { label:'In Review',      value:inReview,    color:'var(--warning)' },
           { label:'Resolved',       value:done,        color:'var(--success)' },
-          { label:'Critical',       value:critical,    color:'var(--danger)'  },
+          { label:'P0',             value:critical,    color:'var(--danger)'  },
           { label:'Resolve Rate',   value:resolveRate+'%', color:'var(--success)' },
         ].map(s => (
           <div key={s.label} className="member-stat-card">
@@ -2991,7 +3497,7 @@ function App() {
 
         <div className="content">
           {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onSelectProject={handleDashboardProjectSelect} currentUser={authUser} toast={toast} onSyncComplete={reloadData}/>}
-          {view==='list'      && <BugList projects={projects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser} onSyncComplete={reloadData}/>}
+          {view==='list'      && <BugList projects={projects} setProjects={setProjects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser} onSyncComplete={reloadData}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
           {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} bugsLoading={allBugsLoading} setBugs={next => { setAllBugsLoaded(true); setAllBugs(next); }} projects={projects} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}
           {view==='roles'     && <RolesPage users={users} currentUser={authUser} toast={toast}/>}

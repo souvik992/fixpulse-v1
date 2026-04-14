@@ -476,7 +476,13 @@ function sanitizeLabel(value) {
 }
 
 function buildIssueRecord(sheetName, headerMap, row) {
-  const inferredCreatedAt = extractRowCreatedDate(row);
+  const specificDateRaw = getByHeader(row, headerMap, [
+    /^date$/, /^issue date$/, /^raised date$/, /^reported date$/, /^bug date$/,
+    /^created date$/, /^date created$/, /^open date$/, /^logged date$/, /^entry date$/,
+  ]);
+  const inferredCreatedAt = specificDateRaw
+    ? parseSheetDateToIso(specificDateRaw)
+    : extractRowCreatedDate(row);
   const raw = {
     date: inferredCreatedAt ? parseExcelDate(inferredCreatedAt.slice(0, 10)) : '',
     raisedBy: getByHeader(row, headerMap, [/^issue raised by$/, /^raised by$/, /^qa owner$/, /^tested by$/]),
@@ -490,6 +496,7 @@ function buildIssueRecord(sheetName, headerMap, row) {
     module: getByHeader(row, headerMap, [/^module$/, /^module page$/, /^page channel$/]),
     feature: getByHeader(row, headerMap, [/^feature$/, /^sales channel$/]),
     titleSource: getByHeader(row, headerMap, [
+      /^issue title$/,
       /^issue description$/,
       /^description of bug$/,
       /^description$/,
@@ -600,14 +607,16 @@ function normalizeSheets(workbook) {
     .filter((sheet) => REQUESTED_SHEETS.size === 0 || REQUESTED_SHEETS.has(sheet.name.toLowerCase()))
     .map((sheet) => {
       const headerIndex = findHeaderRowIndex(sheet.rows || []);
-      if (headerIndex < 0) return { name: sheet.name, state: sheet.state, issues: [] };
-      const headerMap = buildHeaderMap(sheet.rows[headerIndex]);
+      if (headerIndex < 0) return { name: sheet.name, state: sheet.state, issues: [], headers: [] };
+      const headerRow = sheet.rows[headerIndex];
+      const headers = headerRow.map(cleanValue).filter(Boolean);
+      const headerMap = buildHeaderMap(headerRow);
       const issues = (sheet.rows || [])
         .slice(headerIndex + 1)
         .map((row) => buildIssueRecord(sheet.name, headerMap, row))
         .filter(Boolean)
         .filter((issue) => issue.title && issue.title !== 'PENDING ISSUES / IMPLEMENTATIONS');
-      return { name: sheet.name, state: sheet.state, issues };
+      return { name: sheet.name, state: sheet.state, issues, headers };
     })
     .filter((sheet) => sheet.issues.length > 0);
 }
@@ -763,18 +772,20 @@ async function main() {
       try {
       const desiredName = sheet.name === 'WEB POS' ? 'webPOS' : sheet.name;
       let project = projectByName.get(desiredName.toLowerCase());
+      const sheetHeadersJson = JSON.stringify(sheet.headers || []);
       if (!project) {
         const key = makeProjectKey(desiredName, usedKeys);
         const { rows } = await client.query(
-          `INSERT INTO projects (org_id, name, key, description, color)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO projects (org_id, name, key, description, color, sheet_headers)
+           VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING *`,
-          [org.id, desiredName, key, `${desiredName} issues imported from Google Sheet`, makeColor(desiredName)]
+          [org.id, desiredName, key, `${desiredName} issues imported from Google Sheet`, makeColor(desiredName), sheetHeadersJson]
         );
         project = rows[0];
         projectByName.set(project.name.toLowerCase(), project);
         summary.createdProjects.push({ name: project.name, key: project.key });
       } else {
+        await client.query('UPDATE projects SET sheet_headers=$1 WHERE id=$2', [sheetHeadersJson, project.id]);
         summary.reusedProjects.push({ name: project.name, key: project.key });
       }
 

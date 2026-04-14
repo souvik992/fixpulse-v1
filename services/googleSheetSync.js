@@ -171,12 +171,12 @@ function titleCase(value) {
 
 function mapPriority(raw) {
   const value = cleanValue(raw).toLowerCase();
-  if (!value) return 'Medium';
-  if (/(^p0$|critical|immediate|blocker|sev ?0|sev ?1)/.test(value)) return 'Critical';
-  if (/(^p1$|high|urgent)/.test(value)) return 'High';
-  if (/(^p2$|medium|normal)/.test(value)) return 'Medium';
-  if (/(^p3$|low|minor|next release)/.test(value)) return 'Low';
-  return 'Medium';
+  if (!value) return 'P2';
+  if (/(^p0$|critical|immediate|blocker|sev ?0|sev ?1)/.test(value)) return 'P0';
+  if (/(^p1$|high|urgent)/.test(value)) return 'P1';
+  if (/(^p2$|medium|normal)/.test(value)) return 'P2';
+  if (/(^p3$|low|minor|next release)/.test(value)) return 'P3';
+  return 'P2';
 }
 
 function mapStatus(raw) {
@@ -341,7 +341,7 @@ function buildIssueRecord(sheetName, rowNumber, headerMap, row) {
   // because scan-all-cells picks up the first date it finds (could be a "Fixed" or "Deploy" date).
   const specificDateRaw = getByHeader(row, headerMap, [
     /^date$/, /^issue date$/, /^raised date$/, /^reported date$/, /^bug date$/,
-    /^created date$/, /^open date$/, /^logged date$/, /^entry date$/,
+    /^created date$/, /^date created$/, /^open date$/, /^logged date$/, /^entry date$/,
   ]);
   const inferredCreatedAt = specificDateRaw
     ? parseSheetDateToIso(specificDateRaw)
@@ -355,10 +355,10 @@ function buildIssueRecord(sheetName, rowNumber, headerMap, row) {
     browser: getByHeader(row, headerMap, [/^browser$/]),
     environment: getByHeader(row, headerMap, [/^envirnoment$/, /^environment$/, /^deployement status$/, /^stage deployment$/, /^prod deployment$/]),
     retailType: getByHeader(row, headerMap, [/^retail type$/, /^domain retail restaurant$/, /^org type$/]),
-    locationType: getByHeader(row, headerMap, [/^location type$/]),
+    locationType: getByHeader(row, headerMap, [/^location type$/, /^location$/]),
     module: getByHeader(row, headerMap, [/^module$/, /^module page$/, /^page channel$/]),
     feature: getByHeader(row, headerMap, [/^feature$/, /^sales channel$/]),
-    titleSource: getByHeader(row, headerMap, [/^issue description$/, /^description of bug$/, /^description$/, /^issues implementation descriptions$/, /^description implememtation$/, /^remarks$/, /^relix comments$/]),
+    titleSource: getByHeader(row, headerMap, [/^issue title$/, /^issue description$/, /^description of bug$/, /^description$/, /^issues implementation descriptions$/, /^description implememtation$/, /^remarks$/, /^relix comments$/]),
     assigneeRaw: getByHeader(row, headerMap, [/^assignee$/, /^assigned$/, /^owners$/, /^owner$/]),
     priorityRaw: getByHeader(row, headerMap, [/^priority$/, /^priority for current release$/]),
     statusRaw: getByHeader(row, headerMap, [/^issue status$/, /^status$/, /^implementation status$/, /^dev status$/]),
@@ -455,13 +455,15 @@ function normalizeWorkbook(workbook) {
     .filter((sheet) => !IGNORED_SHEETS.has(sheet.name))
     .map((sheet) => {
       const headerIndex = findHeaderRowIndex(sheet.rows || []);
-      if (headerIndex < 0) return { name: sheet.name, issues: [] };
-      const headerMap = buildHeaderMap(sheet.rows[headerIndex]);
+      if (headerIndex < 0) return { name: sheet.name, issues: [], headers: [] };
+      const headerRow = sheet.rows[headerIndex];
+      const headers = headerRow.map(cleanValue).filter(Boolean);
+      const headerMap = buildHeaderMap(headerRow);
       const issues = (sheet.rows || [])
         .slice(headerIndex + 1)
         .map((row, index) => buildIssueRecord(sheet.name, headerIndex + index + 2, headerMap, row))
         .filter(Boolean);
-      return { name: sheet.name, issues };
+      return { name: sheet.name, issues, headers };
     })
     .filter((sheet) => sheet.issues.length > 0);
 }
@@ -498,6 +500,7 @@ async function ensureSchema() {
   await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_sync_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
   await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_last_synced_at TIMESTAMPTZ`);
   await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS data_source_last_error TEXT`);
+  await db.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS sheet_headers JSONB NOT NULL DEFAULT '[]'::jsonb`);
   await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bugs_source_unique ON bugs(source_kind, source_ref) WHERE source_kind IS NOT NULL AND source_ref IS NOT NULL`);
 }
 
@@ -667,15 +670,22 @@ async function ensureUser(org, name, userByName, usedEmails, developerRoleId) {
   return user;
 }
 
-async function ensureProject(org, name, projectByName, usedKeys) {
+async function ensureProject(org, name, projectByName, usedKeys, headers = []) {
   const key = name.toLowerCase();
-  if (projectByName.has(key)) return projectByName.get(key);
+  const headersJson = JSON.stringify(headers);
+  if (projectByName.has(key)) {
+    const project = projectByName.get(key);
+    if (headers.length > 0) {
+      await db.query('UPDATE projects SET sheet_headers=$1 WHERE id=$2', [headersJson, project.id]);
+    }
+    return project;
+  }
   const projectKey = makeProjectKey(name, usedKeys);
   const { rows } = await db.query(
-    `INSERT INTO projects (org_id, name, key, description, color)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO projects (org_id, name, key, description, color, sheet_headers)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [org.id, name, projectKey, `${name} issues synced from Google Sheet`, makeColor(name)]
+    [org.id, name, projectKey, `${name} issues synced from Google Sheet`, makeColor(name), headersJson]
   );
   const project = rows[0];
   await db.query('INSERT INTO project_sequences (project_id, next_num) VALUES ($1, 1) ON CONFLICT (project_id) DO NOTHING', [project.id]);
@@ -733,7 +743,7 @@ async function syncTarget(target) {
 
     for (const sheet of sheets) {
       const projectName = sheet.name === 'WEB POS' ? 'webPOS' : sheet.name;
-      const project = await ensureProject(target, projectName, projectByName, usedKeys);
+      const project = await ensureProject(target, projectName, projectByName, usedKeys, sheet.headers || []);
       for (const sheetIssue of sheet.issues) {
         const issue = { ...sheetIssue, sourceRef: buildSourceRef(target, sheet.name, sheetIssue.rowNumber) };
         const assignee = issue.assigneeNames[0] ? await ensureUser(target, issue.assigneeNames[0], userByName, usedEmails, developerRoleId) : null;

@@ -308,7 +308,10 @@ function auth(req, res, next) {
 
 async function getBugContext(bugId, orgId) {
   const { rows } = await db.query(
-    'SELECT id, project_id, assignee_id, status FROM bugs WHERE id=$1 AND org_id=$2',
+    `SELECT b.id, b.project_id, b.assignee_id, b.status, p.custom_issue_fields
+     FROM bugs b
+     LEFT JOIN projects p ON p.id = b.project_id
+     WHERE b.id=$1 AND b.org_id=$2`,
     [bugId, orgId]
   );
   return rows[0] || null;
@@ -316,7 +319,7 @@ async function getBugContext(bugId, orgId) {
 
 async function getProjectContext(projectId, orgId) {
   const { rows } = await db.query(
-    'SELECT id, key, name FROM projects WHERE id=$1 AND org_id=$2',
+    'SELECT * FROM projects WHERE id=$1 AND org_id=$2',
     [projectId, orgId]
   );
   return rows[0] || null;
@@ -361,6 +364,85 @@ function normalizeAttachments(value) {
     .filter((item) => item.dataUrl.startsWith('data:'));
 }
 
+const ALLOWED_CUSTOM_FIELD_TYPES = new Set(['text', 'textarea', 'select', 'date']);
+
+function sanitizeFieldId(value) {
+  const base = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return base || `field_${Date.now().toString(36)}`;
+}
+
+function sanitizeColor(value, fallback = '#6366f1') {
+  const text = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(text) ? text : fallback;
+}
+
+function sanitizeProjectCustomFields(fields) {
+  if (!Array.isArray(fields)) return [];
+  const seen = new Set();
+  return fields
+    .map((field, index) => {
+      const label = String(field?.label || '').trim().slice(0, 80);
+      const type = ALLOWED_CUSTOM_FIELD_TYPES.has(field?.type) ? field.type : 'text';
+      if (!label) return null;
+      let id = sanitizeFieldId(field?.id || label);
+      while (seen.has(id)) id = `${id}_${index + 1}`;
+      seen.add(id);
+      const options = type === 'select' && Array.isArray(field?.options)
+        ? field.options
+          .map((option, optionIndex) => {
+            const optionLabel = String(option?.label || '').trim().slice(0, 60);
+            if (!optionLabel) return null;
+            return {
+              id: sanitizeFieldId(option?.id || `${label}_${optionIndex + 1}`),
+              label: optionLabel,
+              color: sanitizeColor(option?.color, '#94a3b8'),
+            };
+          })
+          .filter(Boolean)
+          .slice(0, 25)
+        : [];
+      return {
+        id,
+        label,
+        type,
+        required: Boolean(field?.required),
+        options,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function sanitizeCustomFieldValues(values, schema) {
+  const input = values && typeof values === 'object' && !Array.isArray(values) ? values : {};
+  const output = {};
+  for (const field of sanitizeProjectCustomFields(schema)) {
+    const raw = input[field.id];
+    if (raw === undefined || raw === null || raw === '') continue;
+    if (field.type === 'select') {
+      const allowed = new Set((field.options || []).map((option) => option.label));
+      const normalized = String(raw).trim();
+      if (allowed.has(normalized)) output[field.id] = normalized;
+      continue;
+    }
+    if (field.type === 'date') {
+      const normalized = String(raw).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) output[field.id] = normalized;
+      continue;
+    }
+    output[field.id] = String(raw).trim().slice(0, field.type === 'textarea' ? 4000 : 500);
+  }
+  return output;
+}
+
+function canManageCustomFields(user) {
+  return ['admin', 'project_manager', 'qa', 'tester'].includes(String(user?.role || '').toLowerCase());
+}
+
 async function enforceIssueWritePermissions(req, bug, changes) {
   const perms = await getScopedPermissions(req, bug.project_id);
 
@@ -369,7 +451,7 @@ async function enforceIssueWritePermissions(req, bug, changes) {
   }
 
   const required = new Set();
-  const editableFields = ['title', 'description', 'type', 'priority', 'labels', 'attachments', 'referenceLink', 'curlCommand'];
+  const editableFields = ['title', 'description', 'type', 'priority', 'labels', 'attachments', 'referenceLink', 'curlCommand', 'customFields'];
 
   if (editableFields.some((field) => changes[field] !== undefined)) {
     required.add(PERMISSIONS.EDIT_ISSUE);
@@ -1185,10 +1267,10 @@ app.get('/api/projects', auth, async (req, res) => {
 
 app.post('/api/projects', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), async (req, res) => {
   try {
-    const { name, key, description = '', color = '#6366f1' } = req.body;
+    const { name, key, description = '', color = '#6366f1', customIssueFields = [], sheetHeaders = [] } = req.body;
     const { rows } = await db.query(
-      'INSERT INTO projects (org_id,name,key,description,color) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [req.user.orgId, name, key.toUpperCase(), description, color]
+      'INSERT INTO projects (org_id,name,key,description,color,sheet_layout_version,custom_issue_fields,sheet_headers) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [req.user.orgId, name, key.toUpperCase(), description, color, 'compact_v2', JSON.stringify(customIssueFields), JSON.stringify(sheetHeaders)]
     );
 
     const project = camel(rows[0]);
@@ -1198,12 +1280,12 @@ app.post('/api/projects', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), asy
     );
 
     // Add tab to linked XLSX (if any) and push to Apps Script (if configured)
-    addProjectTabToSheet(req.user.orgId, name).catch(e => console.error('[sheet] addProjectTab error:', e.message));
+    addProjectTabToSheet(req.user.orgId, name, project.sheetLayoutVersion).catch(e => console.error('[sheet] addProjectTab error:', e.message));
     db.query('SELECT apps_script_url FROM organizations WHERE id=$1', [req.user.orgId])
       .then(({ rows: r }) => {
         const url = r[0]?.apps_script_url;
         console.log('[sheet] apps_script_url for org:', url || '(none)');
-        if (url) pushNewTabToAppsScript(url, name)
+        if (url) pushNewTabToAppsScript(url, name, project.sheetLayoutVersion, project.customIssueFields || [])
           .then(r => console.log('[sheet] pushNewTab response:', JSON.stringify(r)))
           .catch(e => console.error('[sheet] pushNewTab error:', e.message));
       })
@@ -1219,6 +1301,28 @@ app.delete('/api/projects/:id', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT
   try {
     await db.query('DELETE FROM projects WHERE id=$1 AND org_id=$2', [req.params.id, req.user.orgId]);
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/projects/:id/custom-fields', auth, async (req, res) => {
+  try {
+    const project = await getProjectContext(req.params.id, req.user.orgId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (project.sheet_layout_version !== 'compact_v2') {
+      return res.status(400).json({ error: 'Custom field builder is available only for new projects' });
+    }
+    if (!canManageCustomFields(req.user)) {
+      return res.status(403).json({ error: 'Only admin, project manager, or QA users can manage custom fields' });
+    }
+
+    const customFields = sanitizeProjectCustomFields(req.body?.customFields);
+    const { rows } = await db.query(
+      'UPDATE projects SET custom_issue_fields=$1::jsonb WHERE id=$2 AND org_id=$3 RETURNING *',
+      [JSON.stringify(customFields), req.params.id, req.user.orgId]
+    );
+    res.json(camel(rows[0]));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1333,12 +1437,16 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
       description = '',
       type = 'Bug',
       priority = 'Medium',
+      status = 'To Do',
       assigneeId,
       labels = [],
       attachments = [],
       referenceLink = '',
       curlCommand = '',
+      customFields = {},
     } = req.body;
+    const VALID_STATUSES = ['To Do', 'In Progress', 'In Review', 'Done'];
+    const safeStatus = VALID_STATUSES.includes(status) ? status : 'To Do';
     const reporterId = req.user.id;
 
     const project = await getProjectContext(projectId, req.user.orgId);
@@ -1351,6 +1459,8 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
       return denyMissingPermission(res, PERMISSIONS.ASSIGN_ISSUE);
     }
 
+    const sanitizedCustomFields = sanitizeCustomFieldValues(customFields, project.custom_issue_fields);
+
     const sequence = await db.query(
       'UPDATE project_sequences SET next_num=next_num+1 WHERE project_id=$1 RETURNING next_num-1 AS num',
       [projectId]
@@ -1358,7 +1468,7 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
     const number = sequence.rows[0]?.num ?? 1;
 
     const { rows } = await db.query(
-      'INSERT INTO bugs (org_id,key,project_id,title,description,type,priority,assignee_id,reporter_id,labels,attachments,reference_link,curl_command) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *',
+      'INSERT INTO bugs (org_id,key,project_id,title,description,type,priority,status,assignee_id,reporter_id,labels,attachments,reference_link,curl_command,custom_fields,last_status_change_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16) RETURNING *',
       [
         req.user.orgId,
         `${project.key}-${number}`,
@@ -1367,12 +1477,15 @@ app.post('/api/bugs', auth, checkPermission(PERMISSIONS.CREATE_ISSUE, {
         description,
         type,
         priority,
+        safeStatus,
         assigneeId || null,
         reporterId,
         labels,
         JSON.stringify(normalizeAttachments(attachments)),
         String(referenceLink || ''),
         String(curlCommand || ''),
+        JSON.stringify(sanitizedCustomFields),
+        new Date().toISOString(),
       ]
     );
 
@@ -1439,12 +1552,14 @@ app.put('/api/bugs/:id', auth, async (req, res) => {
 
     for (const [key, value] of Object.entries(req.body)) {
       const column = fieldMap[key] || key.replace(/([A-Z])/g, '_$1').toLowerCase();
-      if (!['title', 'description', 'type', 'priority', 'status', 'assignee_id', 'labels', 'attachments', 'reference_link', 'curl_command'].includes(column)) {
+      if (!['title', 'description', 'type', 'priority', 'status', 'assignee_id', 'labels', 'attachments', 'reference_link', 'curl_command', 'custom_fields'].includes(column)) {
         continue;
       }
       sets.push(`${column}=$${index++}`);
       if (column === 'attachments') {
         values.push(JSON.stringify(normalizeAttachments(value)));
+      } else if (column === 'custom_fields') {
+        values.push(JSON.stringify(sanitizeCustomFieldValues(value, bugContext.custom_issue_fields)));
       } else if (column === 'reference_link' || column === 'curl_command') {
         values.push(String(value || ''));
       } else {
@@ -1452,12 +1567,17 @@ app.put('/api/bugs/:id', auth, async (req, res) => {
       }
     }
 
+    const statusChanged = req.body.status !== undefined && String(req.body.status) !== String(previousRows[0].status);
+    if (statusChanged) {
+      sets.push('last_status_change_at=NOW()');
+    }
+
     if (sets.length) {
       values.push(req.params.id);
       await db.query(`UPDATE bugs SET ${sets.join(',')} WHERE id=$${index}`, values);
     }
 
-    for (const field of ['status', 'priority', 'assigneeId', 'type', 'referenceLink', 'curlCommand']) {
+    for (const field of ['status', 'priority', 'assigneeId', 'type', 'referenceLink', 'curlCommand', 'customFields']) {
       const column = fieldMap[field] || field.replace(/([A-Z])/g, '_$1').toLowerCase();
       if (
         req.body[field] !== undefined &&
@@ -1591,7 +1711,7 @@ app.get('/api/stats', auth, checkPermission(PERMISSIONS.VIEW_REPORTS), async (re
     ]);
 
     const byStatus = { 'To Do': 0, 'In Progress': 0, 'In Review': 0, Done: 0 };
-    const byPriority = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+    const byPriority = { P0: 0, P1: 0, P2: 0, P3: 0 };
     const byType = { Bug: 0, Feature: 0, Task: 0, Improvement: 0 };
 
     statusRows.rows.forEach((row) => {
@@ -1965,7 +2085,29 @@ app.use((err, _req, res, _next) => {
     await redisClient.connect(); // non-fatal — falls back to in-process if unavailable
     await db.connect();
     await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS apps_script_url TEXT`);
+    await db.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS custom_issue_fields JSONB NOT NULL DEFAULT '[]'::jsonb`);
+    await db.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS sheet_layout_version TEXT NOT NULL DEFAULT 'legacy'`);
     await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS sheet_pushed_at TIMESTAMPTZ`);
+    await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb`);
+    await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS last_status_change_at TIMESTAMPTZ`);
+    await db.query(`
+      UPDATE bugs b
+      SET last_status_change_at = status_changes.latest_status_change
+      FROM (
+        SELECT bug_id, MAX(created_at) AS latest_status_change
+        FROM activity
+        WHERE field = 'status'
+        GROUP BY bug_id
+      ) AS status_changes
+      WHERE b.id = status_changes.bug_id
+        AND b.last_status_change_at IS NULL
+    `);
+    await db.query(`
+      UPDATE bugs
+      SET last_status_change_at = COALESCE(created_at, updated_at, NOW())
+      WHERE last_status_change_at IS NULL
+    `);
+    await db.query(`ALTER TABLE bugs ALTER COLUMN last_status_change_at SET DEFAULT NOW()`);
     // Indexes for high-frequency queries
     await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_org_project ON bugs(org_id, project_id)`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_bugs_org_id ON bugs(org_id)`);

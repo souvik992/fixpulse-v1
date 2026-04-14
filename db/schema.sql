@@ -85,9 +85,19 @@ CREATE TABLE IF NOT EXISTS projects (
   key         TEXT        NOT NULL,
   description TEXT        NOT NULL DEFAULT '',
   color       TEXT        NOT NULL DEFAULT '#6366f1',
+  sheet_layout_version TEXT NOT NULL DEFAULT 'legacy',
+  custom_issue_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+  sheet_headers JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(org_id, key)
 );
+
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS sheet_layout_version TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS custom_issue_fields JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS sheet_headers JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS permissions (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -132,7 +142,7 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-  CREATE TYPE issue_priority AS ENUM ('Critical', 'High', 'Medium', 'Low');
+  CREATE TYPE issue_priority AS ENUM ('P0', 'P1', 'P2', 'P3');
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
@@ -151,7 +161,7 @@ CREATE TABLE IF NOT EXISTS bugs (
   title       TEXT           NOT NULL,
   description TEXT           NOT NULL DEFAULT '',
   type        issue_type     NOT NULL DEFAULT 'Bug',
-  priority    issue_priority NOT NULL DEFAULT 'Medium',
+  priority    issue_priority NOT NULL DEFAULT 'P2',
   status      issue_status   NOT NULL DEFAULT 'To Do',
   assignee_id UUID           REFERENCES users(id) ON DELETE SET NULL,
   reporter_id UUID           REFERENCES users(id) ON DELETE SET NULL,
@@ -159,9 +169,11 @@ CREATE TABLE IF NOT EXISTS bugs (
   attachments JSONB          NOT NULL DEFAULT '[]'::jsonb,
   reference_link TEXT        NOT NULL DEFAULT '',
   curl_command TEXT          NOT NULL DEFAULT '',
+  custom_fields JSONB        NOT NULL DEFAULT '{}'::jsonb,
   source_created_at TIMESTAMPTZ,
   created_at  TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-  updated_at  TIMESTAMPTZ    NOT NULL DEFAULT NOW()
+  updated_at  TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+  last_status_change_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS project_sequences (
