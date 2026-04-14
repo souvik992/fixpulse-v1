@@ -31,7 +31,9 @@ const api = {
 };
 
 // ── Utility helpers ────────────────────────────────────────────────────────────
-const statusBadge  = s => ({ 'To Do':'badge-status-todo','In Progress':'badge-status-inprogress','In Review':'badge-status-inreview','Done':'badge-status-done' }[s]||'badge-status-todo');
+const STATUS_LABELS = { 'To Do':'Assigned', 'In Progress':'In Progress', 'In Review':'Pending Retest', 'Done':'Fixed', 'Hold':'Hold' };
+const statusLabel  = s => STATUS_LABELS[s] || s;
+const statusBadge  = s => ({ 'To Do':'badge-status-todo','In Progress':'badge-status-inprogress','In Review':'badge-status-inreview','Done':'badge-status-done','Hold':'badge-status-hold' }[s]||'badge-status-todo');
 const priorityBadge = p => ({ P0:'badge-priority-critical', P1:'badge-priority-high', P2:'badge-priority-medium', P3:'badge-priority-low' }[p]||'badge-priority-medium');
 const typeBadge    = t => ({ Bug:'badge-type-bug', Feature:'badge-type-feature', Task:'badge-type-task', Improvement:'badge-type-improvement' }[t]||'badge-type-task');
 const BADGE_COLORS = {
@@ -50,7 +52,7 @@ const BADGE_COLORS = {
 };
 const priorityIcon = p => ({ P0:'🔴', P1:'🟠', P2:'🟡', P3:'🔵' }[p]||'');
 const typeIcon     = t => ({ Bug:'🐛', Feature:'✨', Task:'📋', Improvement:'⚡' }[t]||'');
-const statusIcon   = s => ({ 'To Do':'○', 'In Progress':'◑', 'In Review':'◕', 'Done':'●' }[s]||'○');
+const statusIcon   = s => ({ 'To Do':'○', 'In Progress':'◑', 'In Review':'◕', 'Done':'●', 'Hold':'⊘' }[s]||'○');
 const timeAgo      = ts => { const d=Math.floor((Date.now()-new Date(ts))/1000); if(d<60)return 'just now'; if(d<3600)return `${Math.floor(d/60)}m ago`; if(d<86400)return `${Math.floor(d/3600)}h ago`; return `${Math.floor(d/86400)}d ago`; };
 const formatDate   = ts => ts ? new Date(ts).toLocaleDateString('en-GB') : '—';
 const formatDateTime = ts => ts ? new Date(ts).toLocaleString('en-GB') : 'Unavailable';
@@ -85,6 +87,11 @@ const getFirstMetadataValue = (description, labels) => {
   }
   return '';
 };
+const normalizePersonName = value => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+const splitCandidateNames = value => String(value || '')
+  .split(/[,/|]/)
+  .map(part => part.trim())
+  .filter(Boolean);
 const isCompactSheetProject = project => project?.sheetLayoutVersion === 'compact_v2';
 const getProjectCustomFields = project => Array.isArray(project?.customIssueFields) ? project.customIssueFields : [];
 const normalizeCustomFieldId = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || `field_${Date.now().toString(36)}`;
@@ -129,7 +136,7 @@ const SHEET_FORM_FIELD_MAP = {
   'Issue Type':        { key:'type',        type:'badge-select', label:'Issue Type',         options:['Bug','Feature','Task','Improvement'], badgeFn:typeBadge, iconFn:typeIcon },
   'Assignee':          { key:'assigneeId',  type:'user-select',  label:'Assignee' },
   'Priority':          { key:'priority',    type:'badge-select', label:'Priority',           options:['P0','P1','P2','P3'], badgeFn:priorityBadge, iconFn:priorityIcon },
-  'Status':            { key:'status',      type:'badge-select', label:'Status',             options:['To Do','In Progress','In Review','Done'], badgeFn:statusBadge, iconFn:statusIcon },
+  'Status':            { key:'status',      type:'badge-select', label:'Status',             options:['To Do','In Progress','In Review','Done','Hold'], badgeFn:statusBadge, iconFn:statusIcon },
   'Application':         { key:'_application',   type:'text',     label:'Application' },
   'OS - Operating System': { key:'_os',          type:'text',     label:'OS - Operating System', metaKey:'Operating System' },
   'Browser':             { key:'_browser',       type:'select',   label:'Browser',   options:['','Chrome','Firefox','Safari','MS Edge','App'] },
@@ -195,11 +202,39 @@ const getSheetFormFields = (project, customFieldOverride) => {
   }
   return fields;
 };
+const findUserByName = (users, rawName) => {
+  const normalized = normalizePersonName(rawName);
+  if (!normalized) return null;
+  return users.find(user => normalizePersonName(user.name) === normalized) || null;
+};
 const resolveIssueUser = (bug, users, idKey, metadataLabels) => {
   const user = bug?.[idKey] ? users.find(u => u.id === bug[idKey]) : null;
   if (user) return user;
   const fallbackName = getFirstMetadataValue(bug?.description, Array.isArray(metadataLabels) ? metadataLabels : [metadataLabels]);
-  return fallbackName ? { name: fallbackName, avatar: '', color: '#64748b' } : null;
+  if (!fallbackName) return null;
+  const exactMatch = findUserByName(users, fallbackName);
+  if (exactMatch) return exactMatch;
+  const splitMatch = splitCandidateNames(fallbackName).map(name => findUserByName(users, name)).find(Boolean);
+  if (splitMatch) return splitMatch;
+  return { name: splitCandidateNames(fallbackName)[0] || fallbackName, avatar: '', color: '#64748b' };
+};
+const normalizeLinkedIssueRef = value => {
+  if (!value) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'object') return String(value.key || value.issueKey || value.id || value.title || '').trim();
+  return String(value).trim();
+};
+const getLinkedIssueRefs = bug => {
+  const raw = bug?.linkedIssues ?? bug?.linked_issues ?? getFirstMetadataValue(bug?.description, ['Linked Bugs', 'Linked Issues', 'Linked Bug']);
+  let values = [];
+  if (Array.isArray(raw)) {
+    values = raw;
+  } else if (typeof raw === 'string') {
+    values = raw.split(/[,\n]/);
+  } else if (raw && typeof raw === 'object') {
+    values = Object.values(raw);
+  }
+  return [...new Set(values.map(normalizeLinkedIssueRef).filter(Boolean))];
 };
 const renderCompactStatusPills = stats => Object.entries(stats.byStatus || {})
   .map(([label, count]) => `<div class="pill"><span>${escapeHtml(label)}</span><strong>${count}</strong></div>`)
@@ -234,7 +269,7 @@ const summarizeBugs = bugs => ({
   openCount: bugs.filter(b => b.status !== 'Done').length,
   doneCount: bugs.filter(b => b.status === 'Done').length,
   byPriority: ['P0','P1','P2','P3'].reduce((acc, label) => ({ ...acc, [label]: bugs.filter(b => b.priority === label).length }), {}),
-  byStatus: ['To Do','In Progress','In Review','Done'].reduce((acc, label) => ({ ...acc, [label]: bugs.filter(b => b.status === label).length }), {}),
+  byStatus: ['To Do','In Progress','In Review','Done','Hold'].reduce((acc, label) => ({ ...acc, [label]: bugs.filter(b => b.status === label).length }), {}),
 });
 const buildProjectReportHtml = ({ project, stats, bugs, users, generatedAt }) => {
   const rows = bugs.map(bug => {
@@ -337,10 +372,10 @@ const APPS_SCRIPT_SNIPPET = `function doPost(e) {
     const p = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const TYPE_COLORS = {'Bug':'#ea4335','Feature':'#34a853','Task':'#4285f4','Improvement':'#9c27b0','New Issue':'#34a853','Regression':'#d93025','Enhancement':'#ff9800','Defect':'#f44336'};
-    const STATUS_COLORS = {'To Do':'#9e9e9e','In Progress':'#1a73e8','In Review':'#e37400','Done':'#1e8e3e'};
+    const STATUS_COLORS = {'To Do':'#9e9e9e','In Progress':'#1a73e8','In Review':'#e37400','Done':'#1e8e3e','Hold':'#e8620a'};
     const PRIORITY_COLORS = {'P0':'#d93025','P1':'#e37400','P2':'#f9ab00','P3':'#1e8e3e'};
     const TYPE_OPTIONS = ['Bug','Feature','Task','Improvement','New Issue','Regression','Enhancement','Defect'];
-    const STATUS_OPTIONS = ['To Do','In Progress','In Review','Done'];
+    const STATUS_OPTIONS = ['To Do','In Progress','In Review','Done','Hold'];
     const PRIORITY_OPTIONS = ['P0','P1','P2','P3'];
     const BROWSER_OPTIONS = ['Chrome','Firefox','Safari','MS Edge','App'];
     const ENVIRONMENT_OPTIONS = ['Dev','Stage','Prod','Upcoming-Stage'];
@@ -796,7 +831,7 @@ function ExportReportFiltersModal({ visible, onClose, currentProject, projects, 
           <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={exportFilters.priority} onChange={e => setExportFilter('priority', e.target.value)}><option value="">All Priorities</option>{['P0','P1','P2','P3'].map(p => <option key={p} value={p}>{p}</option>)}</select></div>
         </div>
         <div className="form-row">
-          <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={exportFilters.status} onChange={e => setExportFilter('status', e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={exportFilters.status} onChange={e => setExportFilter('status', e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done','Hold'].map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}</select></div>
           <div className="form-group"><label className="form-label">Issue Type</label><select className="form-select" value={exportFilters.type} onChange={e => setExportFilter('type', e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
         </div>
       </div>
@@ -892,9 +927,9 @@ function Avatar({ user, size='' }) {
 }
 
 function PriorityBadge({ p }) { return <span className={`badge ${priorityBadge(p)}`}>{priorityIcon(p)} {p}</span>; }
-function StatusBadge({ s })   { return <span className={`badge ${statusBadge(s)}`}>{statusIcon(s)} {s}</span>; }
+function StatusBadge({ s })   { return <span className={`badge ${statusBadge(s)}`}>{statusIcon(s)} {statusLabel(s)}</span>; }
 function TypeBadge({ t })     { return <span className={`badge ${typeBadge(t)}`}>{typeIcon(t)} {t}</span>; }
-function BadgeSelect({ value, onChange, options, badgeFn, iconFn }) {
+function BadgeSelect({ value, onChange, options, badgeFn, iconFn, labelFn }) {
   const cls = badgeFn(value);
   const { bg, fg } = BADGE_COLORS[cls] || {};
   return (
@@ -904,7 +939,7 @@ function BadgeSelect({ value, onChange, options, badgeFn, iconFn }) {
       onChange={e => onChange(e.target.value)}
       style={{ background: bg || '', color: fg || '', fontWeight: 600, borderColor: fg ? `${fg}55` : '' }}
     >
-      {options.map(opt => <option key={opt} value={opt}>{iconFn ? `${iconFn(opt)} ${opt}` : opt}</option>)}
+      {options.map(opt => <option key={opt} value={opt}>{iconFn ? `${iconFn(opt)} ` : ''}{labelFn ? labelFn(opt) : opt}</option>)}
     </select>
   );
 }
@@ -1362,8 +1397,21 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
       .then(res => setProjectPermissions(new Set(res.permissions || [])))
       .catch(() => setProjectPermissions(new Set()));
   },[bug?.projectId]);
-  const updateField = async (field,value) => {
-    const u=await api.put(`/api/bugs/${bugId}`,{[field]:value});
+  const isQARole = ['admin','project_manager','tester','qa'].includes(currentUser?.role);
+  const isAssignee = bug && currentUser && bug.assigneeId === currentUser.id;
+  // Assignee-only users (non-QA/admin) can only set In Progress or Done
+  // When they pick Done it auto-converts to In Review (Pending Retest) for QA
+  const assigneeOnlyMode = isAssignee && !isQARole;
+  const statusOptions = assigneeOnlyMode
+    ? ['In Progress','Done']
+    : ['To Do','In Progress','In Review','Done','Hold'];
+
+  const updateField = async (field, value) => {
+    let actualValue = value;
+    if (field === 'status' && assigneeOnlyMode && value === 'Done') {
+      actualValue = 'In Review'; // developer marks done → goes to Pending Retest
+    }
+    const u = await api.put(`/api/bugs/${bugId}`, { [field]: actualValue });
     if (u?.error) { toast(u.error,'error'); return; }
     setBug(u); onUpdate(u); toast('Updated','success');
   };
@@ -1386,6 +1434,7 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
   const project=bug?projects.find(p=>p.id===bug.projectId):null;
   const assignee=bug?resolveIssueUser(bug,users,'assigneeId',['Assignee(s)','Assignee From Sheet']):null;
   const reporter=bug?resolveIssueUser(bug,users,'reporterId','Raised By'):null;
+  const linkedIssueRefs = bug ? getLinkedIssueRefs(bug) : [];
   if (!bug) return <Modal onClose={onClose}><div className="modal-body" style={{minHeight:200,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--muted)'}}>Loading…</div></Modal>;
   if (editing) return <BugModal bug={bug} projects={projects} users={users} currentUser={currentUser} onClose={()=>setEditing(false)} onSave={b=>{setBug(b);onUpdate(b);setEditing(false);}} toast={toast} />;
   return (
@@ -1449,9 +1498,20 @@ function BugDetail({ bugId, projects, users, onClose, onUpdate, onDelete, toast,
           <div className="detail-sidebar">
             <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16}}>
               <div className="detail-field"><div className="detail-field-label">Issue Type</div><BadgeSelect value={bug.type||'Bug'} onChange={v=>updateField('type',v)} options={['Bug','Feature','Task','Improvement']} badgeFn={typeBadge} iconFn={typeIcon} /></div>
-              <div className="detail-field"><div className="detail-field-label">Status</div><BadgeSelect value={bug.status||'To Do'} onChange={v=>updateField('status',v)} options={['To Do','In Progress','In Review','Done']} badgeFn={statusBadge} iconFn={statusIcon} /></div>
+              <div className="detail-field"><div className="detail-field-label">Status</div><BadgeSelect value={assigneeOnlyMode && bug.status==='In Review' ? 'In Review' : (bug.status||'To Do')} onChange={v=>updateField('status',v)} options={statusOptions} badgeFn={statusBadge} iconFn={statusIcon} labelFn={statusLabel} /></div>
               <div className="detail-field"><div className="detail-field-label">Priority</div><BadgeSelect value={bug.priority||'P2'} onChange={v=>updateField('priority',v)} options={['P0','P1','P2','P3']} badgeFn={priorityBadge} iconFn={priorityIcon} /></div>
-              <div className="detail-field"><div className="detail-field-label">Assignee</div><select className="form-select" value={bug.assigneeId||''} onChange={e=>updateField('assigneeId',e.target.value)} disabled={!projectPermissions.has('ASSIGN_ISSUE')}><option value="">Unassigned</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>{!projectPermissions.has('ASSIGN_ISSUE')&&<div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>You do not have permission to reassign this issue.</div>}</div>
+              <div className="detail-field">
+                <div className="detail-field-label">Assignee</div>
+                {assignee
+                  ? <div className="detail-field-value" style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}><Avatar user={assignee} size="xs"/>{assignee.name}</div>
+                  : <div className="detail-field-value text-sm text-muted" style={{marginBottom:8}}>Unassigned</div>}
+                <select className="form-select" value={bug.assigneeId||''} onChange={e=>updateField('assigneeId',e.target.value)} disabled={!projectPermissions.has('ASSIGN_ISSUE')}>
+                  <option value="">Unassigned</option>
+                  {users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+                {!projectPermissions.has('ASSIGN_ISSUE')&&<div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>You do not have permission to reassign this issue.</div>}
+              </div>
+              {linkedIssueRefs.length>0&&<div className="detail-field"><div className="detail-field-label">Linked Bugs</div><div className="flex gap-1 flex-wrap">{linkedIssueRefs.map(ref=><span key={ref} className="label-chip">{ref}</span>)}</div></div>}
               {!isCompactSheetProject(project)&&(()=>{
                 // Use stored sheet headers if available; fall back to known fields
                 const sidebarHeaders = (Array.isArray(project?.sheetHeaders) && project.sheetHeaders.length > 0)
@@ -1493,7 +1553,7 @@ function DashboardLegacy({ projects, users, currentProject, onNavigate, currentU
     if (lineChart.current) lineChart.current.destroy();
     lineChart.current=new Chart(lineRef.current,{type:'line',data:{labels:stats.daily.map(d=>d.label),datasets:[{label:'Issues',data:stats.daily.map(d=>d.count),borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.15)',tension:0.4,fill:true,pointBackgroundColor:'#6366f1',pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'#334155'},ticks:{color:'#94a3b8'}},y:{grid:{color:'#334155'},ticks:{color:'#94a3b8',stepSize:1}}}}});
     if (doughnutChart.current) doughnutChart.current.destroy();
-    doughnutChart.current=new Chart(doughnutRef.current,{type:'doughnut',data:{labels:Object.keys(stats.byStatus),datasets:[{data:Object.values(stats.byStatus),backgroundColor:['#475569','#6366f1','#fbbf24','#10b981'],borderWidth:0,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#94a3b8',boxWidth:12,font:{size:11}}}}}});
+    doughnutChart.current=new Chart(doughnutRef.current,{type:'doughnut',data:{labels:Object.keys(stats.byStatus),datasets:[{data:Object.values(stats.byStatus),backgroundColor:['#475569','#6366f1','#fbbf24','#10b981','#fb923c'],borderWidth:0,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#94a3b8',boxWidth:12,font:{size:11}}}}}});
     if (barChart.current) barChart.current.destroy();
     barChart.current=new Chart(barRef.current,{type:'bar',data:{labels:Object.keys(stats.byPriority),datasets:[{label:'Issues',data:Object.values(stats.byPriority),backgroundColor:['#ef4444','#fb923c','#fbbf24','#94a3b8'],borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#94a3b8'}},y:{grid:{color:'#334155'},ticks:{color:'#94a3b8',stepSize:1}}}}});
     return()=>{if(lineChart.current)lineChart.current.destroy();if(doughnutChart.current)doughnutChart.current.destroy();if(barChart.current)barChart.current.destroy();};
@@ -1552,7 +1612,7 @@ function DashboardLegacy({ projects, users, currentProject, onNavigate, currentU
               <div className="form-group"><label className="form-label">Priority</label><select className="form-select" value={exportFilters.priority} onChange={e=>setExportFilter('priority',e.target.value)}><option value="">All Priorities</option>{['P0','P1','P2','P3'].map(p=><option key={p} value={p}>{p}</option>)}</select></div>
             </div>
             <div className="form-row">
-              <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={exportFilters.status} onChange={e=>setExportFilter('status',e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s=><option key={s} value={s}>{s}</option>)}</select></div>
+              <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={exportFilters.status} onChange={e=>setExportFilter('status',e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done','Hold'].map(s=><option key={s} value={s}>{s}</option>)}</select></div>
               <div className="form-group"><label className="form-label">Issue Type</label><select className="form-select" value={exportFilters.type} onChange={e=>setExportFilter('type',e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t=><option key={t} value={t}>{t}</option>)}</select></div>
             </div>
           </div>
@@ -1577,7 +1637,7 @@ function BugListLegacy({ projects, users, currentProject, toast, currentUser }) 
       <div className="page-header"><div><h1>Issues</h1><p>{currentProject?currentProject.name:'All Projects'} · {bugs.length} issue{bugs.length!==1?'s':''}</p></div><button className="btn btn-primary" onClick={()=>setShowCreate(true)}>+ Create Issue</button></div>
       <div className="filters-bar">
         <div style={{position:'relative'}}><span className="search-icon">🔍</span><input style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'7px 12px 7px 32px',color:'var(--text)',outline:'none',width:220}} placeholder="Search issues…" value={filters.search} onChange={e=>setFilter('search',e.target.value)}/></div>
-        <select className="filter-select" value={filters.status} onChange={e=>setFilter('status',e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done'].map(s=><option key={s}>{s}</option>)}</select>
+        <select className="filter-select" value={filters.status} onChange={e=>setFilter('status',e.target.value)}><option value="">All Statuses</option>{['To Do','In Progress','In Review','Done','Hold'].map(s=><option key={s}>{s}</option>)}</select>
         <select className="filter-select" value={filters.priority} onChange={e=>setFilter('priority',e.target.value)}><option value="">All Priorities</option>{['P0','P1','P2','P3'].map(p=><option key={p}>{p}</option>)}</select>
         <select className="filter-select" value={filters.type} onChange={e=>setFilter('type',e.target.value)}><option value="">All Types</option>{['Bug','Feature','Task','Improvement'].map(t=><option key={t}>{t}</option>)}</select>
         <select className="filter-select" value={filters.assigneeId} onChange={e=>setFilter('assigneeId',e.target.value)}><option value="">All Assignees</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>
@@ -1602,14 +1662,23 @@ function BugListLegacy({ projects, users, currentProject, toast, currentUser }) 
   );
 }
 
-function Dashboard({ projects, users, currentProject, onSelectProject, currentUser, toast, onSyncComplete }) {
+function Dashboard({ projects, users, currentUser, toast, onSyncComplete }) {
+  const [currentProject, setCurrentProject] = useState(null);
   const [stats, setStats] = useState(null);
   const [allBugs, setAllBugs] = useState([]);
   const [selectedBug, setSelectedBug] = useState(null);
   const [chartsReady, setChartsReady] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 20;
-  const projectOptions = [{ value:'', label:'All Projects' }, ...projects.map(project => ({ value: project.id, label: project.name }))];
+
+  const activeSprintProjects = projects.filter(p => (p.sprintStatus || 'inactive') === 'active');
+  // Project dropdown: "Active Sprint" default + all individual projects
+  const projectOptions = [
+    { value: '', label: `Active Sprint (${activeSprintProjects.length})` },
+    { value: '__all__', label: 'All Projects' },
+    ...projects.map(p => ({ value: p.id, label: p.name })),
+  ];
+
   const lineRef = useRef(null), doughnutRef = useRef(null), barRef = useRef(null);
   const lineChart = useRef(null), doughnutChart = useRef(null), barChart = useRef(null);
   const {
@@ -1623,8 +1692,18 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
   } = useProjectReportExport({ currentProject, projects, users, toast });
 
   const refreshDashboardData = useCallback(async () => {
-    const statsUrl = currentProject ? "/api/stats?projectId=" + currentProject.id : '/api/stats';
-    const bugsUrl = currentProject ? "/api/bugs?projectId=" + currentProject.id : '/api/bugs';
+    let statsUrl, bugsUrl;
+    if (currentProject === '__all__') {
+      statsUrl = '/api/stats';
+      bugsUrl  = '/api/bugs';
+    } else if (currentProject && currentProject.id) {
+      statsUrl = '/api/stats?projectId=' + currentProject.id;
+      bugsUrl  = '/api/bugs?projectId='  + currentProject.id;
+    } else {
+      // Default (null): active sprint only
+      statsUrl = '/api/stats?sprintStatus=active';
+      bugsUrl  = '/api/bugs?sprintStatus=active';
+    }
     const [nextStats, nextBugs] = await Promise.all([api.get(statsUrl), api.get(bugsUrl)]);
     setStats(nextStats);
     setAllBugs(sortBugsByCreatedDateDesc(nextBugs));
@@ -1646,7 +1725,7 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
         if (lineChart.current) lineChart.current.destroy();
         lineChart.current = new ChartLib(lineRef.current, { type:'line', data:{ labels:stats.daily.map(d => d.label), datasets:[{ label:'Issues', data:stats.daily.map(d => d.count), borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.15)', tension:0.4, fill:true, pointBackgroundColor:'#6366f1', pointRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
         if (doughnutChart.current) doughnutChart.current.destroy();
-        doughnutChart.current = new ChartLib(doughnutRef.current, { type:'doughnut', data:{ labels:Object.keys(stats.byStatus), datasets:[{ data:Object.values(stats.byStatus), backgroundColor:['#475569','#6366f1','#fbbf24','#10b981'], borderWidth:0, hoverOffset:6 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', boxWidth:12, font:{ size:11 } } } } } });
+        doughnutChart.current = new ChartLib(doughnutRef.current, { type:'doughnut', data:{ labels:Object.keys(stats.byStatus), datasets:[{ data:Object.values(stats.byStatus), backgroundColor:['#475569','#6366f1','#fbbf24','#10b981','#fb923c'], borderWidth:0, hoverOffset:6 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', boxWidth:12, font:{ size:11 } } } } } });
         if (barChart.current) barChart.current.destroy();
         barChart.current = new ChartLib(barRef.current, { type:'bar', data:{ labels:Object.keys(stats.byPriority), datasets:[{ label:'Issues', data:Object.values(stats.byPriority), backgroundColor:['#ef4444','#fb923c','#fbbf24','#94a3b8'], borderRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ display:false }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
       })
@@ -1677,17 +1756,33 @@ function Dashboard({ projects, users, currentProject, onSelectProject, currentUs
   const currentPage = Math.min(page, totalPages);
   const paginatedBugs = homepageBugs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
+  const sprintLabel = currentProject === '__all__'
+    ? 'All Projects'
+    : currentProject?.name
+      ? currentProject.name
+      : `Active Sprint · ${activeSprintProjects.length} project${activeSprintProjects.length !== 1 ? 's' : ''}`;
+
   return (
     <div>
       <div className="page-header">
-        <div><h1>Dashboard</h1><p>{currentProject ? currentProject.name : 'All Projects'} ? Overview</p></div>
+        <div>
+          <h1>Dashboard</h1>
+          <p style={{display:'flex',alignItems:'center',gap:8}}>
+            {currentProject === null && (
+              <span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,fontWeight:700,color:'#16a34a',background:'rgba(34,197,94,.12)',padding:'2px 8px',borderRadius:99,textTransform:'uppercase',letterSpacing:'.04em'}}>
+                ● Active Sprint
+              </span>
+            )}
+            {sprintLabel}
+          </p>
+        </div>
         <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
           <SearchableSelect
-            value={currentProject?.id || ''}
-            onChange={value => onSelectProject?.(value || null)}
+            value={currentProject?.id || currentProject || ''}
+            onChange={value => setCurrentProject(value === '__all__' ? '__all__' : (value || null))}
             options={projectOptions}
-            placeholder="All Projects"
-            width={220}
+            placeholder="Active Sprint"
+            width={240}
           />
           <button className="btn btn-ghost" onClick={openExportModal}>Export Report</button>
         </div>
@@ -1857,7 +1952,7 @@ function BugList({ projects, setProjects, users, currentProject, toast, currentU
   const [metricsChartsReady, setMetricsChartsReady] = useState(false);
   const [page, setPage] = useState(1);
   const [viewMode, setViewMode] = useState('normal');
-  const statusOptions = ['To Do','In Progress','In Review','Done'].map(value => ({ value, label: value }));
+  const statusOptions = ['To Do','In Progress','In Review','Done','Hold'].map(value => ({ value, label: statusLabel(value) }));
   const priorityOptions = ['P0','P1','P2','P3'].map(value => ({ value, label: value }));
   const typeOptions = ['Bug','Feature','Task','Improvement'].map(value => ({ value, label: value }));
   const assigneeOptions = users.map(user => ({ value: user.id, label: user.name }));
@@ -1891,7 +1986,7 @@ function BugList({ projects, setProjects, users, currentProject, toast, currentU
         if (metricsLineChart.current) metricsLineChart.current.destroy();
         metricsLineChart.current = new ChartLib(metricsLineRef.current, { type:'line', data:{ labels:metricsStats.daily.map(d => d.label), datasets:[{ label:'Issues', data:metricsStats.daily.map(d => d.count), borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.15)', tension:0.4, fill:true, pointBackgroundColor:'#6366f1', pointRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
         if (metricsDoughnutChart.current) metricsDoughnutChart.current.destroy();
-        metricsDoughnutChart.current = new ChartLib(metricsDoughnutRef.current, { type:'doughnut', data:{ labels:Object.keys(metricsStats.byStatus), datasets:[{ data:Object.values(metricsStats.byStatus), backgroundColor:['#475569','#6366f1','#fbbf24','#10b981'], borderWidth:0, hoverOffset:6 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', boxWidth:12, font:{ size:11 } } } } } });
+        metricsDoughnutChart.current = new ChartLib(metricsDoughnutRef.current, { type:'doughnut', data:{ labels:Object.keys(metricsStats.byStatus), datasets:[{ data:Object.values(metricsStats.byStatus), backgroundColor:['#475569','#6366f1','#fbbf24','#10b981','#fb923c'], borderWidth:0, hoverOffset:6 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', boxWidth:12, font:{ size:11 } } } } } });
         if (metricsBarChart.current) metricsBarChart.current.destroy();
         metricsBarChart.current = new ChartLib(metricsBarRef.current, { type:'bar', data:{ labels:Object.keys(metricsStats.byPriority), datasets:[{ label:'Issues', data:Object.values(metricsStats.byPriority), backgroundColor:['#ef4444','#fb923c','#fbbf24','#94a3b8'], borderRadius:4 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ display:false }, ticks:{ color:'#94a3b8' } }, y:{ grid:{ color:'#334155' }, ticks:{ color:'#94a3b8', stepSize:1 } } } } });
       })
@@ -1974,7 +2069,7 @@ function BugList({ projects, setProjects, users, currentProject, toast, currentU
 
 // ── KanbanBoard ────────────────────────────────────────────────────────────────
 function KanbanBoard({ projects, users, currentProject, toast, currentUser }) {
-  const COLS=['To Do','In Progress','In Review','Done'];
+  const COLS=['To Do','In Progress','In Review','Done','Hold'];
   const [bugs,setBugs]=useState([]);
   const [showCreate,setShowCreate]=useState(false);
   const [selectedBug,setSelectedBug]=useState(null);
@@ -1986,7 +2081,7 @@ function KanbanBoard({ projects, users, currentProject, toast, currentUser }) {
   const onDragStart=(e,bug)=>{setDragging(bug);e.dataTransfer.effectAllowed='move';};
   const onDragOver=(e,s)=>{e.preventDefault();setDragOver(s);};
   const onDrop=async(e,s)=>{e.preventDefault();if(!dragging||dragging.status===s){setDragging(null);setDragOver(null);return;}await api.put(`/api/bugs/${dragging.id}`,{status:s});setBugs(bs=>bs.map(b=>b.id===dragging.id?{...b,status:s}:b));toast(`Moved to ${s}`,'success');setDragging(null);setDragOver(null);};
-  const colColors={'To Do':'#475569','In Progress':'#6366f1','In Review':'#fbbf24','Done':'#10b981'};
+  const colColors={'To Do':'#475569','In Progress':'#6366f1','In Review':'#fbbf24','Done':'#10b981','Hold':'#fb923c'};
   return (
     <div>
       <div className="page-header"><div><h1>Board</h1><p>{currentProject?currentProject.name:'All Projects'} · Kanban view</p></div><button className="btn btn-primary" onClick={()=>setShowCreate(true)}>+ Create Issue</button></div>
@@ -2011,7 +2106,7 @@ function KanbanBoard({ projects, users, currentProject, toast, currentUser }) {
 const BASE_SHEET_COLS = ['Date Created','Issue Title','Raised By','Issue Type','Assignee','Priority','Status'];
 
 function ProjectModal({ onClose, onCreate }) {
-  const [form, setForm] = useState({name:'',key:'',description:'',color:'#6366f1'});
+  const [form, setForm] = useState({name:'',key:'',description:'',color:'#6366f1',sprintStatus:'inactive'});
   const [cols, setCols] = useState(() => BASE_SHEET_COLS.map(label => ({ label, isBase: true })));
   const [dragIdx, setDragIdx] = useState(null);
   const [dropIdx, setDropIdx] = useState(null);
@@ -2037,7 +2132,7 @@ function ProjectModal({ onClose, onCreate }) {
       .filter(c => !c.isBase && c.label.trim())
       .map(c => ({ id: normalizeCustomFieldId(c.label.trim()), label: c.label.trim(), type:'text', required:false, options:[] }));
     await onCreate({ ...form, customIssueFields, sheetHeaders });
-    setForm({name:'',key:'',description:'',color:'#6366f1'});
+    setForm({name:'',key:'',description:'',color:'#6366f1',sprintStatus:'inactive'});
     setCols(BASE_SHEET_COLS.map(label => ({ label, isBase: true })));
   };
 
@@ -2049,6 +2144,13 @@ function ProjectModal({ onClose, onCreate }) {
           <div className="form-group"><label className="form-label">Project Name *</label><input className="form-input" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value,key:e.target.value.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,4)}))} required autoFocus/></div>
           <div className="form-group"><label className="form-label">Project Key *</label><input className="form-input" value={form.key} onChange={e=>setForm(f=>({...f,key:e.target.value.toUpperCase()}))} required maxLength={6}/></div>
           <div className="form-group"><label className="form-label">Description</label><textarea className="form-textarea" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div>
+          <div className="form-group">
+            <label className="form-label">Sprint Section</label>
+            <select className="form-select" value={form.sprintStatus} onChange={e=>setForm(f=>({...f,sprintStatus:e.target.value}))}>
+              <option value="active">Active Sprint</option>
+              <option value="inactive">Inactive Sprint</option>
+            </select>
+          </div>
           <div className="form-group"><label className="form-label">Colour</label><div className="color-swatches">{COLORS.map(c=><div key={c} className={`swatch ${form.color===c?'selected':''}`} style={{background:c}} onClick={()=>setForm(f=>({...f,color:c}))}/>)}</div></div>
           <div className="form-group">
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
@@ -2082,18 +2184,129 @@ function ProjectModal({ onClose, onCreate }) {
   );
 }
 
+function ProjectSprintModal({ project, onClose, onSave, saving }) {
+  const [sprintStatus, setSprintStatus] = useState(project?.sprintStatus || 'inactive');
+
+  useEffect(() => {
+    setSprintStatus(project?.sprintStatus || 'inactive');
+  }, [project?.id, project?.sprintStatus]);
+
+  if (!project) return null;
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="modal-header">
+        <h2 className="modal-title">Sprint Section</h2>
+        <button className="btn-icon" onClick={onClose}>✕</button>
+      </div>
+      <div className="modal-body">
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:12,color:'var(--muted)',marginBottom:4}}>Project</div>
+          <div style={{fontSize:18,fontWeight:700}}>{project.name}</div>
+          <div style={{fontSize:12,color:'var(--muted)'}}>{project.key}</div>
+        </div>
+        <div className="form-group" style={{marginBottom:0}}>
+          <label className="form-label">Select Section</label>
+          <select className="form-select" value={sprintStatus} onChange={e=>setSprintStatus(e.target.value)}>
+            <option value="active">Active Sprint</option>
+            <option value="inactive">Inactive Sprint</option>
+          </select>
+        </div>
+      </div>
+      <div className="modal-footer">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" disabled={saving} onClick={()=>onSave(project, sprintStatus)}>
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
   const [showCreate,setShowCreate]=useState(false);
   const [projectToDelete,setProjectToDelete]=useState(null);
+  const [projectToManage,setProjectToManage]=useState(null);
+  const [savingSprintStatus,setSavingSprintStatus]=useState(false);
   const handleCreate=async form=>{const p=await api.post('/api/projects',form);setProjects(ps=>[...ps,p]);setShowCreate(false);onProjectCreated?.(p);toast('Project created','success');};
   const del=async project=>{await api.delete(`/api/projects/${project.id}`);setProjects(ps=>ps.filter(p=>p.id!==project.id));setProjectToDelete(null);toast('Project deleted','info');};
+  const saveSprintStatus=async (project, sprintStatus)=>{
+    setSavingSprintStatus(true);
+    const updated = await api.put(`/api/projects/${project.id}/sprint-status`, { sprintStatus });
+    if (updated?.error) {
+      toast(updated.error, 'error');
+    } else {
+      setProjects(ps=>ps.map(p=>p.id===updated.id?updated:p));
+      setProjectToManage(null);
+      toast(`${updated.name} moved to ${updated.sprintStatus === 'active' ? 'Active Sprint' : 'Inactive Sprint'}`, 'success');
+    }
+    setSavingSprintStatus(false);
+  };
+
+  const activeProjects = projects.filter(p => (p.sprintStatus || 'inactive') === 'active');
+  const inactiveProjects = projects.filter(p => (p.sprintStatus || 'inactive') !== 'active');
+  const renderProjectCard = (p) => (
+    <div
+      key={p.id}
+      role="button"
+      tabIndex={0}
+      onClick={()=>setProjectToManage(p)}
+      onKeyDown={(e)=>{ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setProjectToManage(p); } }}
+      style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,borderTop:`3px solid ${p.color}`,textAlign:'left',cursor:'pointer'}}
+    >
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,gap:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
+          <div style={{width:36,height:36,borderRadius:8,background:p.color,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,color:'#fff',fontSize:14,flexShrink:0}}>{p.key}</div>
+          <div style={{minWidth:0}}>
+            <div style={{fontWeight:600}}>{p.name}</div>
+            <div style={{fontSize:11,color:'var(--muted)'}}>{p.key}</div>
+          </div>
+        </div>
+        <button
+          className="btn btn-danger btn-sm"
+          onClick={(e)=>{e.stopPropagation();setProjectToDelete(p);}}
+        >
+          Delete
+        </button>
+      </div>
+      <div style={{display:'inline-flex',alignItems:'center',gap:6,padding:'4px 10px',borderRadius:999,background:(p.sprintStatus || 'inactive') === 'active' ? 'rgba(34,197,94,.14)' : 'rgba(148,163,184,.16)',color:(p.sprintStatus || 'inactive') === 'active' ? '#16a34a' : 'var(--muted)',fontSize:11,fontWeight:700,letterSpacing:'.04em',textTransform:'uppercase',marginBottom:12}}>
+        {(p.sprintStatus || 'inactive') === 'active' ? 'Active Sprint' : 'Inactive Sprint'}
+      </div>
+      <div style={{fontSize:13,color:'var(--muted)',lineHeight:1.5}}>{p.description||'No description.'}</div>
+      <div style={{fontSize:11,color:'var(--muted)',marginTop:10}}>Created {new Date(p.createdAt).toLocaleDateString()}</div>
+    </div>
+  );
   return (
     <div>
       <div className="page-header"><div><h1>Projects</h1><p>{projects.length} project{projects.length!==1?'s':''}</p></div><button className="btn btn-primary" onClick={()=>setShowCreate(true)}>+ New Project</button></div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:16}}>
-        {projects.map(p=>(<div key={p.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,borderTop:`3px solid ${p.color}`}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:36,height:36,borderRadius:8,background:p.color,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,color:'#fff',fontSize:14}}>{p.key}</div><div><div style={{fontWeight:600}}>{p.name}</div><div style={{fontSize:11,color:'var(--muted)'}}>{p.key}</div></div></div><button className="btn btn-danger btn-sm" onClick={()=>setProjectToDelete(p)}>Delete</button></div><div style={{fontSize:13,color:'var(--muted)',lineHeight:1.5}}>{p.description||'No description.'}</div><div style={{fontSize:11,color:'var(--muted)',marginTop:10}}>Created {new Date(p.createdAt).toLocaleDateString()}</div></div>))}
+      <div style={{display:'grid',gap:24}}>
+        <section>
+          <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:14}}>
+            <div>
+              <h2 style={{fontSize:18,fontWeight:700,marginBottom:4}}>Active Sprint</h2>
+              <div style={{fontSize:12,color:'var(--muted)'}}>Projects currently in motion.</div>
+            </div>
+            <div style={{fontSize:12,color:'var(--muted)'}}>{activeProjects.length} project{activeProjects.length!==1?'s':''}</div>
+          </div>
+          {activeProjects.length
+            ? <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:16}}>{activeProjects.map(renderProjectCard)}</div>
+            : <div className="empty-state" style={{padding:'28px 20px'}}><h3>No active sprint projects</h3><p>Open a project card and move it into Active Sprint.</p></div>}
+        </section>
+        <section>
+          <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:14}}>
+            <div>
+              <h2 style={{fontSize:18,fontWeight:700,marginBottom:4}}>Inactive Sprint</h2>
+              <div style={{fontSize:12,color:'var(--muted)'}}>Projects parked for later or between sprints.</div>
+            </div>
+            <div style={{fontSize:12,color:'var(--muted)'}}>{inactiveProjects.length} project{inactiveProjects.length!==1?'s':''}</div>
+          </div>
+          {inactiveProjects.length
+            ? <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:16}}>{inactiveProjects.map(renderProjectCard)}</div>
+            : <div className="empty-state" style={{padding:'28px 20px'}}><h3>No inactive sprint projects</h3><p>Every project is currently marked active.</p></div>}
+        </section>
       </div>
       {showCreate&&<ProjectModal onClose={()=>setShowCreate(false)} onCreate={handleCreate}/>}
+      {projectToManage&&<ProjectSprintModal project={projectToManage} onClose={()=>setProjectToManage(null)} onSave={saveSprintStatus} saving={savingSprintStatus}/>}
       {projectToDelete&&(<Modal onClose={()=>setProjectToDelete(null)}><div className="modal-header"><h2 className="modal-title">Delete Project</h2><button className="btn-icon" onClick={()=>setProjectToDelete(null)}>✕</button></div><div className="modal-body"><p style={{fontSize:14,lineHeight:1.6,color:'var(--muted)'}}>Are you sure you want to delete <strong style={{color:'var(--text)'}}>{projectToDelete.name}</strong>? This will remove the project and its issues.</p></div><div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={()=>setProjectToDelete(null)}>Cancel</button><button type="button" className="btn btn-danger" onClick={()=>del(projectToDelete)}>Delete Project</button></div></Modal>)}
     </div>
   );
@@ -2124,12 +2337,12 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
 
   // unique assignedBy (reporter) options from this member's bugs
   const assignedByOptions = [...new Map(
-    memberBugs
-      .filter(b => b.reporterId)
-      .map(b => {
-        const u = users.find(u => u.id === b.reporterId);
-        return [b.reporterId, u ? u.name : 'Unknown'];
-      })
+    memberBugs.map(b => {
+      const r = resolveIssueUser(b, users, 'reporterId', 'Raised By');
+      if (!r) return null;
+      const key = b.reporterId || ('name:' + r.name);
+      return [key, r.name];
+    }).filter(Boolean)
   ).entries()].map(([id, name]) => ({ id, name }));
 
   // filtered list
@@ -2137,13 +2350,17 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
     if (filterStatus    && b.status   !== filterStatus)    return false;
     if (filterPriority  && b.priority !== filterPriority)  return false;
     if (filterProject   && String(b.projectId) !== String(filterProject)) return false;
-    if (filterAssignedBy && String(b.reporterId) !== String(filterAssignedBy)) return false;
+    if (filterAssignedBy) {
+      const r = resolveIssueUser(b, users, 'reporterId', 'Raised By');
+      const key = b.reporterId || ('name:' + (r?.name || ''));
+      if (key !== filterAssignedBy) return false;
+    }
     return true;
   });
 
   const activeFilters = [filterStatus, filterPriority, filterProject, filterAssignedBy].filter(Boolean).length;
   const clearFilters = () => { setFilterStatus(''); setFilterPriority(''); setFilterProject(''); setFilterAssignedBy(''); };
-  const statusOptions = ['To Do','In Progress','In Review','Done'].map(value => ({ value, label: value }));
+  const statusOptions = ['To Do','In Progress','In Review','Done','Hold'].map(value => ({ value, label: statusLabel(value) }));
   const priorityOptions = ['P0','P1','P2','P3'].map(value => ({ value, label: value }));
   const projectOptions = projects
     .filter(project => memberBugs.some(b => b.projectId === project.id))
@@ -2226,7 +2443,7 @@ function MemberDashboard({ member, bugs, projects, users, onBack, toast, current
             <tbody>
               {filtered.map(b => {
                 const proj = projects.find(p => p.id === b.projectId);
-                const reporter = b.reporterId ? users.find(u => u.id === b.reporterId) : null;
+                const reporter = resolveIssueUser(b, users, 'reporterId', 'Raised By');
                 return (
                   <tr key={b.id} style={{cursor:'pointer'}} onClick={()=>setSelectedBug(b.id)}>
                     <td><span style={{fontFamily:'monospace',fontSize:12,color:'var(--muted)'}}>{b.key||`#${b.id}`}</span></td>
@@ -2290,6 +2507,8 @@ function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentU
   const [resetTarget, setResetTarget] = useState(null); // member to reset password for
   const [resetResult, setResetResult] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({ name:'', email:'' });
   const setF = (k,v) => setForm(f=>({...f,[k]:v}));
 
   const loadMembers = () => api.get('/api/members').then(setUsers);
@@ -2330,8 +2549,10 @@ function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentU
   };
 
   const removeMember = async id => {
-    if (!confirm('Remove this member from the company?')) return;
-    await api.delete(`/api/members/${id}`);
+    const member = users.find(u => u.id === id);
+    if (!confirm(`Remove ${member?.name || 'this member'} from the organisation? This cannot be undone.`)) return;
+    const res = await api.delete(`/api/members/${id}`);
+    if (res && res.error) { toast(res.error, 'error'); return; }
     setUsers(us => us.filter(u => u.id !== id));
     toast('Member removed', 'info');
   };
@@ -2365,6 +2586,15 @@ function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentU
     setResetTarget(null);
     // server returns { success, tempPassword } — we grab name/email from local state
     setResetResult({ name: member?.name, email: member?.email, tempPassword: res.tempPassword });
+  };
+
+  const editMember = async e => {
+    e.preventDefault();
+    const res = await api.put(`/api/members/${editTarget.id}`, { name: editForm.name, email: editForm.email });
+    if (res.error) { toast(res.error, 'error'); return; }
+    setUsers(us => us.map(u => u.id === editTarget.id ? { ...u, name: res.name, email: res.email } : u));
+    setEditTarget(null);
+    toast('Member updated', 'success');
   };
 
   const copyToClipboard = text => {
@@ -2479,6 +2709,7 @@ function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentU
                     <option value="viewer">Viewer</option>
                   </select>
                   <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>{ setReassignTarget(u); setReassignToId(''); }}>Re-Assign</button>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>{ setEditTarget(u); setEditForm({ name: u.name, email: u.email }); }}>Edit</button>
                   <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>setResetTarget(u)}>🔑 Reset PW</button>
                   <button className="btn btn-danger btn-sm" style={{fontSize:11}} onClick={()=>removeMember(u.id)}>Remove</button>
                 </div>
@@ -2495,6 +2726,23 @@ function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentU
           );
         })}
       </div>
+
+      {/* Edit Member Modal */}
+      {editTarget && (
+        <Modal onClose={()=>setEditTarget(null)}>
+          <div className="modal-header"><h2 className="modal-title">Edit Member</h2><button className="btn-icon" onClick={()=>setEditTarget(null)}>✕</button></div>
+          <form onSubmit={editMember}>
+            <div className="modal-body">
+              <div className="form-group"><label className="form-label">Full Name *</label><input className="form-input" value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} required autoFocus /></div>
+              <div className="form-group"><label className="form-label">Work Email *</label><input className="form-input" type="email" value={editForm.email} onChange={e=>setEditForm(f=>({...f,email:e.target.value}))} required /></div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setEditTarget(null)}>Cancel</button>
+              <button type="submit" className="btn btn-primary">Save</button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {/* Add Member Modal */}
       {showAdd && (
@@ -2586,7 +2834,7 @@ function TeamPage({ users, setUsers, bugs, bugsLoading, setBugs, toast, currentU
         <Modal onClose={()=>setResetTarget(null)}>
           <div className="modal-header"><h2 className="modal-title">Reset Password</h2><button className="btn-icon" onClick={()=>setResetTarget(null)}>✕</button></div>
           <div className="modal-body">
-            <p style={{fontSize:13,color:'var(--muted)'}}>This will generate a new temporary password for <strong>{resetTarget.name}</strong> ({resetTarget.email}). The old password will no longer work.</p>
+            <p style={{fontSize:13,color:'var(--muted)'}}>This will reset the password for <strong>{resetTarget.name}</strong> ({resetTarget.email}) to <strong>1111</strong>. The old password will no longer work.</p>
           </div>
           <div className="modal-footer">
             <button className="btn btn-ghost" onClick={()=>setResetTarget(null)}>Cancel</button>
@@ -3257,7 +3505,9 @@ function App() {
     window.location.replace('/login');
   };
 
-  const currentProject = projects.find(p => p.id === currentProjectId) || null;
+  const currentProject = currentProjectId === '__all__'
+    ? '__all__'
+    : projects.find(p => p.id === currentProjectId) || null;
   const visibleProjects = projects.filter(project => project.name.toLowerCase().includes(projectSearch.toLowerCase()));
   const reloadData = () => {
     setProjectsLoading(true);
@@ -3356,7 +3606,7 @@ function App() {
         <div className="topbar">
           <span className="topbar-title">
             {navItems.find(n=>n.id===view)?.icon} {navItems.find(n=>n.id===view)?.label}
-            {currentProject&&<span style={{color:'var(--muted)',fontWeight:400,marginLeft:6}}>/ {currentProject.name}</span>}
+            {currentProject && view !== 'dashboard' && <span style={{color:'var(--muted)',fontWeight:400,marginLeft:6}}>/ {currentProject.name}</span>}
           </span>
           {(() => { const others = onlineUsers.filter(u => u.id !== authUser.id); return others.length > 0 && (
             <div className="online-members" title={`${others.length} online`}>
@@ -3402,7 +3652,7 @@ function App() {
         </div>
 
         <div className="content">
-          {view==='dashboard' && <Dashboard projects={projects} users={users} currentProject={currentProject} onSelectProject={handleDashboardProjectSelect} currentUser={authUser} toast={toast} onSyncComplete={reloadData}/>}
+          {view==='dashboard' && <Dashboard projects={projects} users={users} currentUser={authUser} toast={toast} onSyncComplete={reloadData}/>}
           {view==='list'      && <BugList projects={projects} setProjects={setProjects} users={users} currentProject={currentProject} toast={toast} currentUser={authUser} onSyncComplete={reloadData}/>}
           {view==='projects'  && <ProjectsPage projects={projects} setProjects={setProjects} toast={toast} onProjectCreated={handleProjectCreated}/>}
           {view==='team'      && <TeamPage users={users} setUsers={setUsers} bugs={allBugs} bugsLoading={allBugsLoading} setBugs={next => { setAllBugsLoaded(true); setAllBugs(next); }} projects={projects} toast={toast} currentUser={authUser} onCurrentUserUpdated={user=>setAuthUser(user)}/>}

@@ -182,10 +182,18 @@ function mapPriority(raw) {
 function mapStatus(raw) {
   const value = cleanValue(raw).toLowerCase();
   if (!value) return 'To Do';
+  // Exact display-label matches (values written by this app to the sheet)
+  if (value === 'assigned')       return 'To Do';
+  if (value === 'in progress')    return 'In Progress';
+  if (value === 'pending retest') return 'In Review';
+  if (value === 'fixed')          return 'Done';
+  if (value === 'hold')           return 'Hold';
+  // Fuzzy fallback for other sheet values
   if (/(closed|fixed|done|resolved|completed|complete|deployed|not feasible|not required|released|available on stage)/.test(value)) return 'Done';
   if (/(pending retest|retest|in review|review|qa|testing|uat|ready for qa)/.test(value)) return 'In Review';
-  if (/(inprogress|in progress|working|ongoing|progress|development|under dev|assigned|hold|not fixed)/.test(value)) return 'In Progress';
-  if (/(open|todo|to do|pending|new|backlog)/.test(value)) return 'To Do';
+  if (/(on hold|hold|blocked|parked|deferred|paused)/.test(value)) return 'Hold';
+  if (/(inprogress|in progress|working|ongoing|progress|development|under dev|not fixed)/.test(value)) return 'In Progress';
+  if (/(open|todo|to do|pending|new|backlog|assigned)/.test(value)) return 'To Do';
   return 'To Do';
 }
 
@@ -743,9 +751,11 @@ async function syncTarget(target) {
 
     for (const sheet of sheets) {
       const projectName = sheet.name === 'WEB POS' ? 'webPOS' : sheet.name;
+      // Use the normalised project name in source_ref so tab renames never create duplicates
+      const canonicalTabName = projectName;
       const project = await ensureProject(target, projectName, projectByName, usedKeys, sheet.headers || []);
       for (const sheetIssue of sheet.issues) {
-        const issue = { ...sheetIssue, sourceRef: buildSourceRef(target, sheet.name, sheetIssue.rowNumber) };
+        const issue = { ...sheetIssue, sourceRef: buildSourceRef(target, canonicalTabName, sheetIssue.rowNumber) };
         const assignee = issue.assigneeNames[0] ? await ensureUser(target, issue.assigneeNames[0], userByName, usedEmails, developerRoleId) : null;
         const reporter = issue.reporterName ? await ensureUser(target, issue.reporterName, userByName, usedEmails, developerRoleId) : null;
         const sourceHash = hashIssue(issue);

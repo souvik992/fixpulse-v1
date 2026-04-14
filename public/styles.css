@@ -24,6 +24,7 @@
   --bdg-prog-bg:    rgba(99,102,241,.15);  --bdg-prog-fg:    #818cf8;
   --bdg-rev-bg:     rgba(251,191,36,.15);  --bdg-rev-fg:     #fbbf24;
   --bdg-done-bg:    rgba(16,185,129,.15);  --bdg-done-fg:    #10b981;
+  --bdg-hold-bg:    rgba(249,115,22,.15);  --bdg-hold-fg:    #fb923c;
   --bdg-crit-bg:    rgba(239,68,68,.2);    --bdg-crit-fg:    #ef4444;
   --bdg-high-bg:    rgba(249,115,22,.2);   --bdg-high-fg:    #fb923c;
   --bdg-med-bg:     rgba(251,191,36,.2);   --bdg-med-fg:     #fbbf24;
@@ -68,6 +69,7 @@ html[data-theme="light"] {
   --bdg-prog-bg:    #deebff;              --bdg-prog-fg:    #0052cc;
   --bdg-rev-bg:     #fffae6;              --bdg-rev-fg:     #974f0c;
   --bdg-done-bg:    #e3fcef;              --bdg-done-fg:    #006644;
+  --bdg-hold-bg:    #fff4e6;              --bdg-hold-fg:    #c45a00;
   --bdg-crit-bg:    #ffebe6;              --bdg-crit-fg:    #bf2600;
   --bdg-high-bg:    #fff0e6;              --bdg-high-fg:    #974f0c;
   --bdg-med-bg:     #fffae6;              --bdg-med-fg:     #974f0c;
@@ -359,6 +361,7 @@ html[data-theme="light"] .btn-danger {
 .badge-status-inprogress { background: var(--bdg-prog-bg); color: var(--bdg-prog-fg); }
 .badge-status-inreview   { background: var(--bdg-rev-bg);  color: var(--bdg-rev-fg);  }
 .badge-status-done       { background: var(--bdg-done-bg); color: var(--bdg-done-fg); }
+.badge-status-hold       { background: var(--bdg-hold-bg); color: var(--bdg-hold-fg); }
 .badge-priority-critical { background: var(--bdg-crit-bg); color: var(--bdg-crit-fg); }
 .badge-priority-high     { background: var(--bdg-high-bg); color: var(--bdg-high-fg); }
 .badge-priority-medium   { background: var(--bdg-med-bg);  color: var(--bdg-med-fg);  }

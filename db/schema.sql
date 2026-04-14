@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS projects (
   key         TEXT        NOT NULL,
   description TEXT        NOT NULL DEFAULT '',
   color       TEXT        NOT NULL DEFAULT '#6366f1',
+  sprint_status TEXT      NOT NULL DEFAULT 'inactive',
   sheet_layout_version TEXT NOT NULL DEFAULT 'legacy',
   custom_issue_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
   sheet_headers JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -92,6 +93,8 @@ CREATE TABLE IF NOT EXISTS projects (
   UNIQUE(org_id, key)
 );
 
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS sprint_status TEXT NOT NULL DEFAULT 'inactive';
 ALTER TABLE projects
   ADD COLUMN IF NOT EXISTS sheet_layout_version TEXT NOT NULL DEFAULT 'legacy';
 ALTER TABLE projects
@@ -136,7 +139,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
 
 -- ── bugs ───────────────────────────────────────────────────────
 DO $$ BEGIN
-  CREATE TYPE issue_status AS ENUM ('To Do', 'In Progress', 'In Review', 'Done');
+  CREATE TYPE issue_status AS ENUM ('To Do', 'In Progress', 'In Review', 'Done', 'Hold');
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;

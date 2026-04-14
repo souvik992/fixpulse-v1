@@ -105,6 +105,10 @@ function normalizePlan(planCode) {
   return PLAN_DEFINITIONS[planCode] || PLAN_DEFINITIONS[DEFAULT_PLAN_CODE];
 }
 
+function normalizeSprintStatus(value, fallback = 'inactive') {
+  return String(value || fallback).trim().toLowerCase() === 'active' ? 'active' : 'inactive';
+}
+
 function buildOrgPayload(orgRow) {
   const org = camel(orgRow);
   const plan = normalizePlan(org.planCode);
@@ -1122,15 +1126,15 @@ app.post('/api/members', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async 
 
 app.put('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
-    const { name, role, color, avatarDataUrl } = req.body;
+    const { name, email, role, color, avatarDataUrl } = req.body;
     const allowedRoles = new Set(['admin', 'project_manager', 'developer', 'frontend_developer', 'backend_developer', 'tester', 'viewer', 'qa']);
     if (role && !allowedRoles.has(role)) {
       return res.status(400).json({ error: 'Unsupported role' });
     }
     if (avatarDataUrl && !avatarDataUrl.startsWith('data:image/')) return res.status(400).json({ error: 'Invalid avatar data URL' });
     const { rows } = await db.query(
-      'UPDATE users SET name=COALESCE($1,name),role=COALESCE($2,role),color=COALESCE($3,color),avatar=COALESCE($6,avatar) WHERE id=$4 AND org_id=$5 RETURNING *',
-      [name, role, color, req.params.id, req.user.orgId, avatarDataUrl]
+      'UPDATE users SET name=COALESCE($1,name),email=COALESCE($7,email),role=COALESCE($2,role),color=COALESCE($3,color),avatar=COALESCE($6,avatar) WHERE id=$4 AND org_id=$5 RETURNING *',
+      [name, role, color, req.params.id, req.user.orgId, avatarDataUrl, email || null]
     );
 
     if (!rows.length) {
@@ -1239,7 +1243,7 @@ app.delete('/api/members/:id', auth, checkPermission(PERMISSIONS.MANAGE_USERS), 
 
 app.post('/api/members/:id/reset-password', auth, checkPermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
   try {
-    const tempPassword = req.body.password || 'Welcome@123';
+    const tempPassword = req.body.password || '1111';
     const hash = await bcrypt.hash(tempPassword, 10);
 
     await db.query('UPDATE users SET password_hash=$1 WHERE id=$2 AND org_id=$3', [
@@ -1267,10 +1271,13 @@ app.get('/api/projects', auth, async (req, res) => {
 
 app.post('/api/projects', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), async (req, res) => {
   try {
-    const { name, key, description = '', color = '#6366f1', customIssueFields = [], sheetHeaders = [] } = req.body;
+    const { name, key, description = '', color = '#6366f1', customIssueFields = [], sheetHeaders = [], sprintStatus } = req.body;
+    const nextSprintStatus = sprintStatus
+      ? normalizeSprintStatus(sprintStatus)
+      : (['webpos', 'hrms'].includes(String(name || '').trim().toLowerCase()) ? 'active' : 'inactive');
     const { rows } = await db.query(
-      'INSERT INTO projects (org_id,name,key,description,color,sheet_layout_version,custom_issue_fields,sheet_headers) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-      [req.user.orgId, name, key.toUpperCase(), description, color, 'compact_v2', JSON.stringify(customIssueFields), JSON.stringify(sheetHeaders)]
+      'INSERT INTO projects (org_id,name,key,description,color,sheet_layout_version,custom_issue_fields,sheet_headers,sprint_status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.user.orgId, name, key.toUpperCase(), description, color, 'compact_v2', JSON.stringify(customIssueFields), JSON.stringify(sheetHeaders), nextSprintStatus]
     );
 
     const project = camel(rows[0]);
@@ -1292,6 +1299,20 @@ app.post('/api/projects', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), asy
       .catch(e => console.error('[sheet] org query error:', e.message));
 
     res.status(201).json(project);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/projects/:id/sprint-status', auth, checkPermission(PERMISSIONS.MANAGE_PROJECT), async (req, res) => {
+  try {
+    const sprintStatus = normalizeSprintStatus(req.body?.sprintStatus);
+    const { rows } = await db.query(
+      'UPDATE projects SET sprint_status=$1 WHERE id=$2 AND org_id=$3 RETURNING *',
+      [sprintStatus, req.params.id, req.user.orgId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Project not found' });
+    res.json(camel(rows[0]));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1330,7 +1351,7 @@ app.put('/api/projects/:id/custom-fields', auth, async (req, res) => {
 
 app.get('/api/bugs', auth, checkPermission(PERMISSIONS.VIEW_ISSUE), async (req, res) => {
   try {
-    const { projectId, status, priority, type, assigneeId, search, page, pageSize } = req.query;
+    const { projectId, status, priority, type, assigneeId, search, page, pageSize, sprintStatus } = req.query;
     const conditions = ['org_id=$1'];
     const values = [req.user.orgId];
     let index = 2;
@@ -1338,6 +1359,9 @@ app.get('/api/bugs', auth, checkPermission(PERMISSIONS.VIEW_ISSUE), async (req, 
     if (projectId) {
       conditions.push(`project_id=$${index++}`);
       values.push(projectId);
+    } else if (sprintStatus) {
+      conditions.push(`project_id IN (SELECT id FROM projects WHERE org_id=$1 AND sprint_status=$${index++})`);
+      values.push(sprintStatus);
     }
     if (status) {
       conditions.push(`status=$${index++}`);
@@ -1667,13 +1691,13 @@ app.delete('/api/bugs/:id/comments/:cid', auth, async (req, res) => {
 
 app.get('/api/stats', auth, checkPermission(PERMISSIONS.VIEW_REPORTS), async (req, res) => {
   try {
-    const { projectId } = req.query;
+    const { projectId, sprintStatus } = req.query;
     const perms = await getScopedPermissions(req, projectId || null);
     if (!perms.has(PERMISSIONS.VIEW_REPORTS)) {
       return denyMissingPermission(res, PERMISSIONS.VIEW_REPORTS);
     }
 
-    const cacheKey = `stats:${req.user.orgId}:${projectId || 'all'}`;
+    const cacheKey = `stats:${req.user.orgId}:${projectId || (sprintStatus ? 'sprint:' + sprintStatus : 'all')}`;
     const cached   = await cache.get(cacheKey);
     if (cached) return res.json(cached);
 
@@ -1683,12 +1707,17 @@ app.get('/api/stats', auth, checkPermission(PERMISSIONS.VIEW_REPORTS), async (re
     if (projectId) {
       filters.push(`project_id = $${values.length + 1}`);
       values.push(projectId);
+    } else if (sprintStatus) {
+      filters.push(`project_id IN (SELECT id FROM projects WHERE org_id = $1 AND sprint_status = $${values.length + 1})`);
+      values.push(sprintStatus);
     }
 
     const where = filters.join(' AND ');
     const dailyFilters = ['b.org_id = $1'];
     if (projectId) {
-      dailyFilters.push('b.project_id = $2');
+      dailyFilters.push(`b.project_id = $2`);
+    } else if (sprintStatus) {
+      dailyFilters.push(`b.project_id IN (SELECT id FROM projects WHERE org_id = $1 AND sprint_status = $2)`);
     }
     const dailyWhere = dailyFilters.join(' AND ');
 
@@ -1710,7 +1739,7 @@ app.get('/api/stats', auth, checkPermission(PERMISSIONS.VIEW_REPORTS), async (re
       ),
     ]);
 
-    const byStatus = { 'To Do': 0, 'In Progress': 0, 'In Review': 0, Done: 0 };
+    const byStatus = { 'To Do': 0, 'In Progress': 0, 'In Review': 0, Done: 0, Hold: 0 };
     const byPriority = { P0: 0, P1: 0, P2: 0, P3: 0 };
     const byType = { Bug: 0, Feature: 0, Task: 0, Improvement: 0 };
 
@@ -2054,10 +2083,8 @@ app.get('/api/sheet-export', auth, async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  if (hasTokenMarkerCookie(req)) {
-    return res.sendFile(path.join(__dirname, 'public', 'app-shell.html'));
-  }
-  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (hasTokenMarkerCookie(req)) return res.redirect('/app');
+  return res.redirect('/login');
 });
 app.get('/doc', (_req, res) => res.sendFile(path.join(__dirname, 'doc', 'index.html')));
 app.get('/doc/', (_req, res) => res.sendFile(path.join(__dirname, 'doc', 'index.html')));
@@ -2087,6 +2114,18 @@ app.use((err, _req, res, _next) => {
     await db.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS apps_script_url TEXT`);
     await db.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS custom_issue_fields JSONB NOT NULL DEFAULT '[]'::jsonb`);
     await db.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS sheet_layout_version TEXT NOT NULL DEFAULT 'legacy'`);
+    await db.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS sprint_status TEXT NOT NULL DEFAULT 'inactive'`);
+    await db.query(`
+      UPDATE projects
+      SET sprint_status = 'active'
+      WHERE LOWER(TRIM(name)) IN ('webpos', 'hrms')
+    `);
+    await db.query(`
+      UPDATE projects
+      SET sprint_status = 'inactive'
+      WHERE sprint_status IS NULL OR sprint_status NOT IN ('active', 'inactive')
+    `);
+    await db.query(`ALTER TYPE issue_status ADD VALUE IF NOT EXISTS 'Hold'`);
     await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS sheet_pushed_at TIMESTAMPTZ`);
     await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb`);
     await db.query(`ALTER TABLE bugs ADD COLUMN IF NOT EXISTS last_status_change_at TIMESTAMPTZ`);
