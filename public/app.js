@@ -2629,7 +2629,6 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
   const [logoFile, setLogoFile] = useState(null);
   const [spreadsheetFile, setSpreadsheetFile] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [planSaving, setPlanSaving] = useState('');
   const [syncingSource, setSyncingSource] = useState(false);
   const [exportingSheet, setExportingSheet] = useState(false);
   const [scriptCopied, setScriptCopied] = useState(false);
@@ -2699,60 +2698,6 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
     <div className="empty-state"><div className="icon">🔒</div><h3>Admin Only</h3><p>Only admins can access company settings.</p></div>
   );
 
-  const changePlan = async planCode => {
-    setPlanSaving(planCode);
-    const plan = PLAN_OPTIONS.find(p => p.code === planCode);
-    if (!plan) {
-      toast('Unsupported plan', 'error');
-      setPlanSaving('');
-      return;
-    }
-    if (plan.code === 'basic') {
-      const res = await api.put('/api/org/plan', { planCode });
-      if (res.error) toast(res.error, 'error');
-      else { setOrg(res); toast(`${res.planName} plan activated`, 'success'); }
-      setPlanSaving('');
-      return;
-    }
-    try {
-      await ensureRazorpayLoaded();
-      const order = await api.post('/api/billing/create-order', { planCode });
-      if (order.error) { toast(order.error, 'error'); setPlanSaving(''); return; }
-      const paymentObject = new window.Razorpay({
-        key: order.keyId,
-        amount: order.amount,
-        currency: order.currency,
-        name: 'FixPulse',
-        description: `${plan.name} Plan Upgrade`,
-        order_id: order.orderId,
-        theme: { color: '#17a34a' },
-        handler: async response => {
-          const verified = await api.post('/api/billing/verify-payment', {
-            razorpayOrderId: response.razorpay_order_id,
-            razorpayPaymentId: response.razorpay_payment_id,
-            razorpaySignature: response.razorpay_signature,
-          });
-          if (verified.error) {
-            toast(verified.error, 'error');
-            setPlanSaving('');
-            return;
-          }
-          setOrg(verified);
-          toast(`${verified.planName} plan activated`, 'success');
-          setPlanSaving('');
-        },
-        modal: {
-          ondismiss: () => setPlanSaving(''),
-        },
-      });
-      paymentObject.open();
-    } catch (error) {
-      toast(error.message || 'Unable to start payment', 'error');
-      setPlanSaving('');
-    }
-  };
-
-  const currentUsers = users?.length || org?.currentUserCount || 0;
   const sourceSummary = {
     google_sheet: org?.dataSourceUrl || 'Google Sheet link saved',
     xlsx: org?.dataSourceFileName || 'Excel file uploaded',
@@ -2783,45 +2728,6 @@ function SettingsPage({ org, setOrg, currentUser, toast, users }) {
     <div>
       <div className="page-header"><div><h1>Company Settings</h1><p>Manage your organisation</p></div></div>
       <div style={{maxWidth:960}}>
-        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:24,marginBottom:16}}>
-          <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'flex-start',marginBottom:18,flexWrap:'wrap'}}>
-            <div>
-              <h3 style={{fontSize:14,fontWeight:600,marginBottom:4}}>Plan & Billing</h3>
-              <p style={{fontSize:13,color:'var(--muted)'}}>Current plan: <strong>{org?.planName || 'Enterprise'}</strong> · {org?.userLimit===null?'Unlimited users':`${currentUsers}/${org?.userLimit} users used`}</p>
-            </div>
-            <button className="btn btn-ghost" onClick={()=>window.open('/pricing.html','_blank')}>View Pricing Page</button>
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:16}}>
-            {PLAN_OPTIONS.map(plan => {
-              const active = org?.planCode === plan.code;
-              const overLimit = plan.userLimit !== null && currentUsers > plan.userLimit;
-              return (
-                <div key={plan.code} style={{background:plan.featured?'linear-gradient(180deg, color-mix(in srgb, var(--surface) 86%, white 14%), var(--surface))':'var(--surface2)',border:`1px solid ${active?'var(--primary)':'var(--border)'}`,borderRadius:20,padding:20,boxShadow:plan.featured?'0 16px 40px rgba(23,163,74,.12)':'none'}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-                    <strong style={{fontSize:18}}>{plan.name}</strong>
-                    {active
-                      ? <span style={{fontSize:11,fontWeight:700,color:'var(--primary)'}}>ACTIVE</span>
-                      : plan.featured
-                        ? <span style={{fontSize:11,fontWeight:700,color:'#16a34a'}}>POPULAR</span>
-                        : null}
-                  </div>
-                  <div style={{fontSize:28,fontWeight:800,marginBottom:6,letterSpacing:'-.03em'}}>{plan.price}</div>
-                  <div style={{fontSize:12,color:'var(--muted)',marginBottom:12}}>{plan.userLimit===null?'Unlimited users':`Up to ${plan.userLimit} users`}</div>
-                  <p style={{fontSize:12,color:'var(--muted)',lineHeight:1.6,marginBottom:16,minHeight:58}}>{plan.blurb}</p>
-                  <div style={{display:'grid',gap:8,marginBottom:16,fontSize:12,color:'var(--text)'}}>
-                    <div>Unlimited projects and issues</div>
-                    <div>Dashboard and report export</div>
-                    <div>{plan.userLimit===null?'Best for company-wide adoption':'Role-based workflow included'}</div>
-                  </div>
-                  <button className="btn btn-primary btn-sm" disabled={active || overLimit || !!planSaving} onClick={()=>changePlan(plan.code)} style={{width:'100%',justifyContent:'center'}}>
-                    {active ? 'Current Plan' : overLimit ? 'Too Many Users' : planSaving===plan.code ? 'Updating…' : plan.cta}
-                  </button>
-                  {!active && overLimit && <div style={{fontSize:11,color:'var(--danger)',marginTop:8}}>Reduce team size before switching.</div>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
         <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:24}}>
           <h3 style={{fontSize:14,fontWeight:600,marginBottom:20}}>Organisation Details</h3>
           <form onSubmit={save}>

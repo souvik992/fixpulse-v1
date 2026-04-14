@@ -1,6 +1,6 @@
-# FixPulseHQ
+# FixPulse v1
 
-FixPulseHQ is a Jira-style issue tracker built as a single Node.js application with an Express API and a React frontend served from the same server.
+FixPulse is a issue tracker built as a single Node.js application with an Express API and a React frontend served from the same server.
 
 It supports company workspaces, JWT authentication, role-based team management, project-level issue tracking, dashboard analytics, and PostgreSQL-backed persistence.
 

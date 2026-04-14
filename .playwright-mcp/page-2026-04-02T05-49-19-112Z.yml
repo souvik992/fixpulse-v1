@@ -1,8 +1,0 @@
-- generic [ref=e4]:
-  - generic [ref=e5]: BT
-  - heading "BugTracker" [level=1] [ref=e6]
-  - paragraph [ref=e7]: Professional bug & issue tracking for your team
-  - generic [ref=e8]:
-    - button "🔑 Log In to Your Company" [ref=e9] [cursor=pointer]
-    - button "🏢 Register a New Company" [ref=e10] [cursor=pointer]
-  - paragraph [ref=e11]: Multi-tenant · Role-based access · Real-time tracking

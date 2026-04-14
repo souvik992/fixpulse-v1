@@ -99,12 +99,6 @@
     ];
     return [...base, ...getProjectCustomFields(project).map((field) => ({ key: `custom:${field.id}`, label: field.label, field }))];
   };
-  var CUSTOM_FIELD_TYPES = [
-    { value: "text", label: "Single line" },
-    { value: "textarea", label: "Paragraph" },
-    { value: "select", label: "Dropdown" },
-    { value: "date", label: "Date" }
-  ];
   var LEGACY_SHEET_HEADERS_CLIENT = ["S.No", "Issue Description", "Status", "Priority", "Assignee", "Issue Type", "Application", "OS - Operating System", "Browser", "Environment", "Retail Type", "Location Type", "Module", "Feature", "Raised By", "Date", "Dev Comments", "QA Comments", "Sprint"];
   var COMPACT_SHEET_HEADERS_CLIENT = ["Date Created", "Issue Title", "Raised By", "Issue Type", "Assignee", "Priority", "Status"];
   var META_PREFIXES = ["Source Tab:", "Source Row:", "Date:", "Raised By:", "Application:", "Issue Type:", "Operating System:", "Browser:", "Environment:", "Retail Type:", "Location Type:", "Module:", "Feature:", "Assignee(s):", "Priority (Original):", "Status (Original):", "Sprint:", "Version:", "QA Check:", "Release:", "Slicing:", "Affected Components:", "Mode:", "Steps To Reproduce:", "Developer Comments:", "QA Comments:", "Assignee From Sheet:"];
@@ -150,24 +144,24 @@
       const storedHeaders = Array.isArray(project?.sheetHeaders) && project.sheetHeaders.length > 0 ? project.sheetHeaders : null;
       if (storedHeaders) {
         const customByLabel = Object.fromEntries(customFields.map((cf) => [String(cf.label || "").trim().toLowerCase(), cf]));
-        const fields2 = [];
+        const fields3 = [];
         for (const h of storedHeaders) {
           if (AUTO_SKIP_HEADERS.has(h)) continue;
           const mapped = SHEET_FORM_FIELD_MAP[h];
           if (mapped === null) continue;
           if (mapped) {
-            if (mapped.key !== "title") fields2.push(mapped);
+            if (mapped.key !== "title") fields3.push(mapped);
           } else {
             const cf = customByLabel[h.trim().toLowerCase()];
             if (cf) {
-              fields2.push({ key: `custom:${cf.id}`, type: "custom", label: cf.label, field: cf });
+              fields3.push({ key: `custom:${cf.id}`, type: "custom", label: cf.label, field: cf });
             } else {
               const isTA = /comment|notes|remark|step|description|feedback/i.test(h);
-              fields2.push({ key: "_metaFields", metaKey: h, type: isTA ? "meta-textarea" : "meta-text", label: h });
+              fields3.push({ key: "_metaFields", metaKey: h, type: isTA ? "meta-textarea" : "meta-text", label: h });
             }
           }
         }
-        return fields2;
+        return fields3;
       }
       const fields2 = COMPACT_SHEET_HEADERS_CLIENT.map((h) => SHEET_FORM_FIELD_MAP[h]).filter((f) => f && f.key !== "title");
       fields2.push(...customFields.map((cf) => ({ key: `custom:${cf.id}`, type: "custom", label: cf.label, field: cf })));
@@ -306,11 +300,6 @@
   var COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#38bdf8", "#ec4899", "#8b5cf6", "#14b8a6"];
   var ROLE_LABELS = { admin: "Admin", project_manager: "Project Manager", developer: "Developer", frontend_developer: "Frontend Developer", backend_developer: "Backend Developer", tester: "QA", viewer: "Viewer", qa: "QA", "Project Manager": "Project Manager", "Developer": "Developer", "Frontend Developer": "Frontend Developer", "Backend Developer": "Backend Developer", "Tester": "QA", "QA": "QA", "Viewer": "Viewer" };
   var ROLE_COLORS = { admin: "#ef4444", project_manager: "#f97316", developer: "#6366f1", frontend_developer: "#3b82f6", backend_developer: "#2563eb", tester: "#10b981", viewer: "#9ca3af", qa: "#10b981", "Admin": "#ef4444", "Project Manager": "#f97316", "Developer": "#6366f1", "Frontend Developer": "#3b82f6", "Backend Developer": "#2563eb", "Tester": "#10b981", "Viewer": "#9ca3af" };
-  var PLAN_OPTIONS = [
-    { code: "basic", name: "Basic", price: "Free", userLimit: 10, blurb: "A clean starting point for small teams that need structured bug tracking without complexity.", cta: "Start Free", featured: false },
-    { code: "plus", name: "Plus", price: "$32.50 / mo", userLimit: 50, blurb: "A professional plan for active engineering, QA, and delivery teams that need more seats and room to grow.", cta: "Pay and Upgrade", featured: true },
-    { code: "enterprise", name: "Enterprise", price: "$108.30 / mo", userLimit: null, blurb: "For larger rollouts, unlimited seats, and organizations that need unrestricted team expansion.", cta: "Pay and Upgrade", featured: false }
-  ];
   var ALL_PERMISSIONS = ["CREATE_ISSUE", "EDIT_ISSUE", "DELETE_ISSUE", "ASSIGN_ISSUE", "CHANGE_STATUS", "COMMENT", "VIEW_ISSUE", "VIEW_REPORTS", "MANAGE_PROJECT", "MANAGE_USERS", "CONFIGURE_WORKFLOW"];
   var APPS_SCRIPT_SNIPPET = `function doPost(e) {
   try {
@@ -387,17 +376,17 @@
           : [];
         const hasExistingHeaders = sheetHeaders.some(Boolean);
         if (!hasExistingHeaders) {
-          // New / empty tab — write headers then data
+          // New / empty tab \u2014 write headers then data
           sh.getRange(1, 1, 1, headers.length).setValues([headers]);
           if (rows.length) {
             sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
             applyDropdownsAndColors();
           }
         } else if (rows.length) {
-          // Normalize header name — S.No variants all map to the same key
+          // Normalize header name \u2014 S.No variants all map to the same key
           const normH = h => {
-            const s = String(h || '').trim().toLowerCase().replace(/\s+/g, '');
-            if (/^(s\.?no\.?|sr\.?no\.?|serialno\.?|no\.|#)$/.test(s)) return '__sno__';
+            const s = String(h || '').trim().toLowerCase().replace(/s+/g, '');
+            if (/^(s.?no.?|sr.?no.?|serialno.?|no.|#)$/.test(s)) return '__sno__';
             return s;
           };
           // Remap each incoming row to the sheet's existing column order
@@ -499,22 +488,6 @@
     reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(file);
-  });
-  var ensureRazorpayLoaded = () => new Promise((resolve, reject) => {
-    if (window.Razorpay) return resolve(true);
-    const existing = document.querySelector("script[data-razorpay-checkout]");
-    if (existing) {
-      existing.addEventListener("load", () => resolve(true), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Unable to load Razorpay checkout")), { once: true });
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.dataset.razorpayCheckout = "true";
-    script.onload = () => resolve(true);
-    script.onerror = () => reject(new Error("Unable to load Razorpay checkout"));
-    document.body.appendChild(script);
   });
   var ensureChartJsLoaded = () => new Promise((resolve, reject) => {
     if (window.Chart) return resolve(window.Chart);
@@ -1119,31 +1092,6 @@
     }
     return /* @__PURE__ */ React.createElement("input", { className: "form-input", value: value || "", onChange: (e) => onChange(e.target.value), placeholder: field.label });
   }
-  function CustomFieldSchemaEditor({ fields, setFields, disabled }) {
-    const addField = () => setFields((current) => [...current, { id: normalizeCustomFieldId(`field_${current.length + 1}`), label: "", type: "text", required: false, options: [] }]);
-    const updateField = (index, patch) => setFields((current) => current.map((field, fieldIndex) => fieldIndex === index ? { ...field, ...patch } : field));
-    const removeField = (index) => setFields((current) => current.filter((_, fieldIndex) => fieldIndex !== index));
-    const moveField = (fromIndex, toIndex) => setFields((current) => {
-      if (toIndex < 0 || toIndex >= current.length) return current;
-      const next = [...current];
-      const [item] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, item);
-      return next;
-    });
-    const updateOption = (fieldIndex, optionIndex, patch) => setFields((current) => current.map((field, currentFieldIndex) => {
-      if (currentFieldIndex !== fieldIndex) return field;
-      const options = [...field.options || []];
-      options[optionIndex] = { ...options[optionIndex], ...patch };
-      return { ...field, options };
-    }));
-    const addOption = (fieldIndex) => setFields((current) => current.map((field, currentFieldIndex) => currentFieldIndex === fieldIndex ? { ...field, options: [...field.options || [], { id: normalizeCustomFieldId(`${field.label || "option"}_${Date.now()}`), label: "", color: "#94a3b8" }] } : field));
-    const removeOption = (fieldIndex, optionIndex) => setFields((current) => current.map((field, currentFieldIndex) => currentFieldIndex === fieldIndex ? { ...field, options: (field.options || []).filter((_, currentOptionIndex) => currentOptionIndex !== optionIndex) } : field));
-    return /* @__PURE__ */ React.createElement("div", { style: { border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 14, background: "var(--surface2)", display: "grid", gap: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 600, fontSize: 13 } }, "Sheet Fields"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--muted)" } }, "QA can add extra columns, set dropdown options, and reorder them for new projects.")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: addField, disabled }, "+ Add Field")), fields.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "text-muted text-sm" }, "No extra fields yet. Default sheet columns will still be used."), fields.map((field, index) => /* @__PURE__ */ React.createElement("div", { key: field.id || index, draggable: !disabled, onDragStart: (e) => e.dataTransfer.setData("text/plain", String(index)), onDragOver: (e) => e.preventDefault(), onDrop: (e) => {
-      e.preventDefault();
-      const fromIndex = Number(e.dataTransfer.getData("text/plain"));
-      if (Number.isFinite(fromIndex)) moveField(fromIndex, index);
-    }, style: { border: "1px solid var(--border)", borderRadius: 12, padding: 12, background: "var(--surface)", display: "grid", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "var(--muted)", cursor: "grab" } }, "Drag"), /* @__PURE__ */ React.createElement("input", { className: "form-input", value: field.label || "", onChange: (e) => updateField(index, { label: e.target.value, id: field.id || normalizeCustomFieldId(e.target.value) }), placeholder: "Field label", disabled, style: { flex: "1 1 240px" } }), /* @__PURE__ */ React.createElement("select", { className: "form-select", value: field.type || "text", onChange: (e) => updateField(index, { type: e.target.value, options: e.target.value === "select" ? field.options || [] : [] }), disabled, style: { maxWidth: 180 } }, CUSTOM_FIELD_TYPES.map((option) => /* @__PURE__ */ React.createElement("option", { key: option.value, value: option.value }, option.label))), /* @__PURE__ */ React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: Boolean(field.required), onChange: (e) => updateField(index, { required: e.target.checked }), disabled }), " Required"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: () => moveField(index, index - 1), disabled: disabled || index === 0 }, "Up"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: () => moveField(index, index + 1), disabled: disabled || index === fields.length - 1 }, "Down"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: () => removeField(index), disabled }, "Remove")), field.type === "select" && /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gap: 8 } }, (field.options || []).map((option, optionIndex) => /* @__PURE__ */ React.createElement("div", { key: option.id || optionIndex, style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("input", { className: "form-input", value: option.label || "", onChange: (e) => updateOption(index, optionIndex, { label: e.target.value }), placeholder: "Option label", disabled, style: { flex: "1 1 220px" } }), /* @__PURE__ */ React.createElement("input", { type: "color", value: option.color || "#94a3b8", onChange: (e) => updateOption(index, optionIndex, { color: e.target.value }), disabled, style: { width: 42, height: 42, border: "1px solid var(--border)", borderRadius: 10, background: "transparent" } }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: () => removeOption(index, optionIndex), disabled }, "Remove Option"))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: () => addOption(index), disabled }, "+ Add Option")))));
-  }
   function BugList({ projects, setProjects, users, currentProject, toast, currentUser, onSyncComplete }) {
     const [bugs, setBugs] = useState([]);
     const [filters, setFilters] = useState({ status: "", priority: "", type: "", assigneeId: "", search: "" });
@@ -1223,7 +1171,7 @@
       await load();
     } }), /* @__PURE__ */ React.createElement(ExportReportFiltersModal, { visible: showExportFilters, onClose: closeExportModal, currentProject, projects, users, exportFilters, setExportFilter, onReset: resetExportFilters, onExport: exportReport }));
   }
-  const BASE_SHEET_COLS = ["Date Created","Issue Title","Raised By","Issue Type","Assignee","Priority","Status"];
+  var BASE_SHEET_COLS = ["Date Created", "Issue Title", "Raised By", "Issue Type", "Assignee", "Priority", "Status"];
   function ProjectModal({ onClose, onCreate }) {
     const [form, setForm] = useState({ name: "", key: "", description: "", color: "#6366f1" });
     const [cols, setCols] = useState(() => BASE_SHEET_COLS.map((label) => ({ label, isBase: true })));
@@ -1245,53 +1193,40 @@
       e.preventDefault();
       if (!form.name || !form.key) return;
       const sheetHeaders = cols.map((c) => c.label.trim()).filter(Boolean);
-      const customIssueFields = cols.filter((c) => !c.isBase && c.label.trim())
-        .map((c) => ({ id: normalizeCustomFieldId(c.label.trim()), label: c.label.trim(), type: "text", required: false, options: [] }));
+      const customIssueFields = cols.filter((c) => !c.isBase && c.label.trim()).map((c) => ({ id: normalizeCustomFieldId(c.label.trim()), label: c.label.trim(), type: "text", required: false, options: [] }));
       await onCreate({ ...form, customIssueFields, sheetHeaders });
       setForm({ name: "", key: "", description: "", color: "#6366f1" });
       setCols(BASE_SHEET_COLS.map((label) => ({ label, isBase: true })));
     };
-    return /* @__PURE__ */ React.createElement(Modal, { onClose },
-      /* @__PURE__ */ React.createElement("div", { className: "modal-header" },
-        /* @__PURE__ */ React.createElement("h2", { className: "modal-title" }, "New Project"),
-        /* @__PURE__ */ React.createElement("button", { className: "btn-icon", onClick: onClose }, "\u2715")),
-      /* @__PURE__ */ React.createElement("form", { onSubmit: create },
-        /* @__PURE__ */ React.createElement("div", { className: "modal-body" },
-          /* @__PURE__ */ React.createElement("div", { className: "form-group" },
-            /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Project Name *"),
-            /* @__PURE__ */ React.createElement("input", { className: "form-input", value: form.name, onChange: (e) => setForm((f) => ({ ...f, name: e.target.value, key: e.target.value.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 4) })), required: true, autoFocus: true })),
-          /* @__PURE__ */ React.createElement("div", { className: "form-group" },
-            /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Project Key *"),
-            /* @__PURE__ */ React.createElement("input", { className: "form-input", value: form.key, onChange: (e) => setForm((f) => ({ ...f, key: e.target.value.toUpperCase() })), required: true, maxLength: 6 })),
-          /* @__PURE__ */ React.createElement("div", { className: "form-group" },
-            /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Description"),
-            /* @__PURE__ */ React.createElement("textarea", { className: "form-textarea", value: form.description, onChange: (e) => setForm((f) => ({ ...f, description: e.target.value })) })),
-          /* @__PURE__ */ React.createElement("div", { className: "form-group" },
-            /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Colour"),
-            /* @__PURE__ */ React.createElement("div", { className: "color-swatches" },
-              COLORS.map((c) => /* @__PURE__ */ React.createElement("div", { key: c, className: `swatch ${form.color === c ? "selected" : ""}`, style: { background: c }, onClick: () => setForm((f) => ({ ...f, color: c })) })))),
-          /* @__PURE__ */ React.createElement("div", { className: "form-group" },
-            /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
-              /* @__PURE__ */ React.createElement("label", { className: "form-label", style: { margin: 0 } }, "Sheet Columns"),
-              /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: addCol }, "+ Add Column")),
-            /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--muted)", marginBottom: 8 } }, "Drag to reorder. Column order matches the sheet."),
-            cols.map((col, idx) => /* @__PURE__ */ React.createElement("div", {
-              key: idx,
-              draggable: true,
-              onDragStart: (e) => { e.dataTransfer.setData("text/plain", String(idx)); setDragIdx(idx); },
-              onDragOver: (e) => { e.preventDefault(); setDropIdx(idx); },
-              onDrop: (e) => { e.preventDefault(); moveCol(Number(e.dataTransfer.getData("text/plain")), idx); setDragIdx(null); setDropIdx(null); },
-              onDragEnd: () => { setDragIdx(null); setDropIdx(null); },
-              style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 6, opacity: dragIdx === idx ? 0.4 : 1, borderTop: dropIdx === idx && dragIdx !== idx ? "2px solid var(--accent)" : "2px solid transparent", paddingTop: 2, transition: "border-color .1s" }
-            },
-              /* @__PURE__ */ React.createElement("span", { style: { color: "var(--muted)", cursor: "grab", fontSize: 16, lineHeight: 1, userSelect: "none" } }, "\u28BF"),
-              col.isBase
-                ? /* @__PURE__ */ React.createElement("span", { style: { flex: 1, fontSize: 13, padding: "6px 10px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" } }, col.label)
-                : /* @__PURE__ */ React.createElement("input", { className: "form-input", value: col.label, onChange: (e) => updateCol(idx, e.target.value), placeholder: "Column header name", style: { flex: 1 } }),
-              /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: () => removeCol(idx), style: { flexShrink: 0 } }, "\u2715"))))),
-        /* @__PURE__ */ React.createElement("div", { className: "modal-footer" },
-          /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost", onClick: onClose }, "Cancel"),
-          /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-primary" }, "Create Project"))));
+    return /* @__PURE__ */ React.createElement(Modal, { onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal-header" }, /* @__PURE__ */ React.createElement("h2", { className: "modal-title" }, "New Project"), /* @__PURE__ */ React.createElement("button", { className: "btn-icon", onClick: onClose }, "\u2715")), /* @__PURE__ */ React.createElement("form", { onSubmit: create }, /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Project Name *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", value: form.name, onChange: (e) => setForm((f) => ({ ...f, name: e.target.value, key: e.target.value.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 4) })), required: true, autoFocus: true })), /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Project Key *"), /* @__PURE__ */ React.createElement("input", { className: "form-input", value: form.key, onChange: (e) => setForm((f) => ({ ...f, key: e.target.value.toUpperCase() })), required: true, maxLength: 6 })), /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Description"), /* @__PURE__ */ React.createElement("textarea", { className: "form-textarea", value: form.description, onChange: (e) => setForm((f) => ({ ...f, description: e.target.value })) })), /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Colour"), /* @__PURE__ */ React.createElement("div", { className: "color-swatches" }, COLORS.map((c) => /* @__PURE__ */ React.createElement("div", { key: c, className: `swatch ${form.color === c ? "selected" : ""}`, style: { background: c }, onClick: () => setForm((f) => ({ ...f, color: c })) })))), /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { className: "form-label", style: { margin: 0 } }, "Sheet Columns"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: addCol }, "+ Add Column")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--muted)", marginBottom: 8 } }, "Drag to reorder. Column order matches the sheet."), cols.map((col, idx) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        key: idx,
+        draggable: true,
+        onDragStart: (e) => {
+          e.dataTransfer.setData("text/plain", String(idx));
+          setDragIdx(idx);
+        },
+        onDragOver: (e) => {
+          e.preventDefault();
+          setDropIdx(idx);
+        },
+        onDrop: (e) => {
+          e.preventDefault();
+          moveCol(Number(e.dataTransfer.getData("text/plain")), idx);
+          setDragIdx(null);
+          setDropIdx(null);
+        },
+        onDragEnd: () => {
+          setDragIdx(null);
+          setDropIdx(null);
+        },
+        style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 6, opacity: dragIdx === idx ? 0.4 : 1, borderTop: dropIdx === idx && dragIdx !== idx ? "2px solid var(--accent)" : "2px solid transparent", paddingTop: 2, transition: "border-color .1s" }
+      },
+      /* @__PURE__ */ React.createElement("span", { style: { color: "var(--muted)", cursor: "grab", fontSize: 16, lineHeight: 1, userSelect: "none" } }, "\u283F"),
+      col.isBase ? /* @__PURE__ */ React.createElement("span", { style: { flex: 1, fontSize: 13, padding: "6px 10px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" } }, col.label) : /* @__PURE__ */ React.createElement("input", { className: "form-input", value: col.label, onChange: (e) => updateCol(idx, e.target.value), placeholder: "Column header name", style: { flex: 1 } }),
+      /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: () => removeCol(idx), style: { flexShrink: 0 } }, "\u2715")
+    )))), /* @__PURE__ */ React.createElement("div", { className: "modal-footer" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-primary" }, "Create Project"))));
   }
   function ProjectsPage({ projects, setProjects, toast, onProjectCreated }) {
     const [showCreate, setShowCreate] = useState(false);
@@ -1309,33 +1244,7 @@
       setProjectToDelete(null);
       toast("Project deleted", "info");
     };
-    return /* @__PURE__ */ React.createElement("div", null,
-      /* @__PURE__ */ React.createElement("div", { className: "page-header" },
-        /* @__PURE__ */ React.createElement("div", null,
-          /* @__PURE__ */ React.createElement("h1", null, "Projects"),
-          /* @__PURE__ */ React.createElement("p", null, projects.length, " project", projects.length !== 1 ? "s" : "")),
-        /* @__PURE__ */ React.createElement("button", { className: "btn btn-primary", onClick: () => setShowCreate(true) }, "+ New Project")),
-      /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 } },
-        projects.map((p) => /* @__PURE__ */ React.createElement("div", { key: p.id, style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 20, borderTop: `3px solid ${p.color}` } },
-          /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 } },
-            /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-              /* @__PURE__ */ React.createElement("div", { style: { width: 36, height: 36, borderRadius: 8, background: p.color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#fff", fontSize: 14 } }, p.key),
-              /* @__PURE__ */ React.createElement("div", null,
-                /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 600 } }, p.name),
-                /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--muted)" } }, p.key))),
-            /* @__PURE__ */ React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => setProjectToDelete(p) }, "Delete")),
-          /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: "var(--muted)", lineHeight: 1.5 } }, p.description || "No description."),
-          /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--muted)", marginTop: 10 } }, "Created ", new Date(p.createdAt).toLocaleDateString())))),
-      showCreate && /* @__PURE__ */ React.createElement(ProjectModal, { onClose: () => setShowCreate(false), onCreate: handleCreate }),
-      projectToDelete && /* @__PURE__ */ React.createElement(Modal, { onClose: () => setProjectToDelete(null) },
-        /* @__PURE__ */ React.createElement("div", { className: "modal-header" },
-          /* @__PURE__ */ React.createElement("h2", { className: "modal-title" }, "Delete Project"),
-          /* @__PURE__ */ React.createElement("button", { className: "btn-icon", onClick: () => setProjectToDelete(null) }, "\u2715")),
-        /* @__PURE__ */ React.createElement("div", { className: "modal-body" },
-          /* @__PURE__ */ React.createElement("p", { style: { fontSize: 14, lineHeight: 1.6, color: "var(--muted)" } }, "Are you sure you want to delete ", /* @__PURE__ */ React.createElement("strong", { style: { color: "var(--text)" } }, projectToDelete.name), "? This will remove the project and its issues.")),
-        /* @__PURE__ */ React.createElement("div", { className: "modal-footer" },
-          /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost", onClick: () => setProjectToDelete(null) }, "Cancel"),
-          /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-danger", onClick: () => del(projectToDelete) }, "Delete Project"))));
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-header" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", null, "Projects"), /* @__PURE__ */ React.createElement("p", null, projects.length, " project", projects.length !== 1 ? "s" : "")), /* @__PURE__ */ React.createElement("button", { className: "btn btn-primary", onClick: () => setShowCreate(true) }, "+ New Project")), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 } }, projects.map((p) => /* @__PURE__ */ React.createElement("div", { key: p.id, style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 20, borderTop: `3px solid ${p.color}` } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 36, height: 36, borderRadius: 8, background: p.color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#fff", fontSize: 14 } }, p.key), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 600 } }, p.name), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--muted)" } }, p.key))), /* @__PURE__ */ React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => setProjectToDelete(p) }, "Delete")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: "var(--muted)", lineHeight: 1.5 } }, p.description || "No description."), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--muted)", marginTop: 10 } }, "Created ", new Date(p.createdAt).toLocaleDateString())))), showCreate && /* @__PURE__ */ React.createElement(ProjectModal, { onClose: () => setShowCreate(false), onCreate: handleCreate }), projectToDelete && /* @__PURE__ */ React.createElement(Modal, { onClose: () => setProjectToDelete(null) }, /* @__PURE__ */ React.createElement("div", { className: "modal-header" }, /* @__PURE__ */ React.createElement("h2", { className: "modal-title" }, "Delete Project"), /* @__PURE__ */ React.createElement("button", { className: "btn-icon", onClick: () => setProjectToDelete(null) }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("p", { style: { fontSize: 14, lineHeight: 1.6, color: "var(--muted)" } }, "Are you sure you want to delete ", /* @__PURE__ */ React.createElement("strong", { style: { color: "var(--text)" } }, projectToDelete.name), "? This will remove the project and its issues.")), /* @__PURE__ */ React.createElement("div", { className: "modal-footer" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-ghost", onClick: () => setProjectToDelete(null) }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-danger", onClick: () => del(projectToDelete) }, "Delete Project"))));
   }
   function MemberDashboard({ member, bugs, projects, users, onBack, toast, currentUser }) {
     const [filterStatus, setFilterStatus] = useState("");
@@ -1587,7 +1496,6 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
     const [logoFile, setLogoFile] = useState(null);
     const [spreadsheetFile, setSpreadsheetFile] = useState(null);
     const [saving, setSaving] = useState(false);
-    const [planSaving, setPlanSaving] = useState("");
     const [syncingSource, setSyncingSource] = useState(false);
     const [exportingSheet, setExportingSheet] = useState(false);
     const [scriptCopied, setScriptCopied] = useState(false);
@@ -1665,66 +1573,6 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
       setSaving(false);
     };
     if (currentUser?.role !== "admin") return /* @__PURE__ */ React.createElement("div", { className: "empty-state" }, /* @__PURE__ */ React.createElement("div", { className: "icon" }, "\u{1F512}"), /* @__PURE__ */ React.createElement("h3", null, "Admin Only"), /* @__PURE__ */ React.createElement("p", null, "Only admins can access company settings."));
-    const changePlan = async (planCode) => {
-      setPlanSaving(planCode);
-      const plan = PLAN_OPTIONS.find((p) => p.code === planCode);
-      if (!plan) {
-        toast("Unsupported plan", "error");
-        setPlanSaving("");
-        return;
-      }
-      if (plan.code === "basic") {
-        const res = await api.put("/api/org/plan", { planCode });
-        if (res.error) toast(res.error, "error");
-        else {
-          setOrg(res);
-          toast(`${res.planName} plan activated`, "success");
-        }
-        setPlanSaving("");
-        return;
-      }
-      try {
-        await ensureRazorpayLoaded();
-        const order = await api.post("/api/billing/create-order", { planCode });
-        if (order.error) {
-          toast(order.error, "error");
-          setPlanSaving("");
-          return;
-        }
-        const paymentObject = new window.Razorpay({
-          key: order.keyId,
-          amount: order.amount,
-          currency: order.currency,
-          name: "FixPulse",
-          description: `${plan.name} Plan Upgrade`,
-          order_id: order.orderId,
-          theme: { color: "#17a34a" },
-          handler: async (response) => {
-            const verified = await api.post("/api/billing/verify-payment", {
-              razorpayOrderId: response.razorpay_order_id,
-              razorpayPaymentId: response.razorpay_payment_id,
-              razorpaySignature: response.razorpay_signature
-            });
-            if (verified.error) {
-              toast(verified.error, "error");
-              setPlanSaving("");
-              return;
-            }
-            setOrg(verified);
-            toast(`${verified.planName} plan activated`, "success");
-            setPlanSaving("");
-          },
-          modal: {
-            ondismiss: () => setPlanSaving("")
-          }
-        });
-        paymentObject.open();
-      } catch (error) {
-        toast(error.message || "Unable to start payment", "error");
-        setPlanSaving("");
-      }
-    };
-    const currentUsers = users?.length || org?.currentUserCount || 0;
     const sourceSummary = {
       google_sheet: org?.dataSourceUrl || "Google Sheet link saved",
       xlsx: org?.dataSourceFileName || "Excel file uploaded",
@@ -1748,11 +1596,7 @@ Password: ${newCredentials.tempPassword}`) }, copied ? "\u2713 Copied" : "\u{1F4
         toast("Unable to copy script", "error");
       }
     };
-    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-header" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", null, "Company Settings"), /* @__PURE__ */ React.createElement("p", null, "Manage your organisation"))), /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 960 } }, /* @__PURE__ */ React.createElement("div", { style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 24, marginBottom: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 18, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: { fontSize: 14, fontWeight: 600, marginBottom: 4 } }, "Plan & Billing"), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--muted)" } }, "Current plan: ", /* @__PURE__ */ React.createElement("strong", null, org?.planName || "Enterprise"), " \xB7 ", org?.userLimit === null ? "Unlimited users" : `${currentUsers}/${org?.userLimit} users used`)), /* @__PURE__ */ React.createElement("button", { className: "btn btn-ghost", onClick: () => window.open("/pricing.html", "_blank") }, "View Pricing Page")), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 16 } }, PLAN_OPTIONS.map((plan) => {
-      const active = org?.planCode === plan.code;
-      const overLimit = plan.userLimit !== null && currentUsers > plan.userLimit;
-      return /* @__PURE__ */ React.createElement("div", { key: plan.code, style: { background: plan.featured ? "linear-gradient(180deg, color-mix(in srgb, var(--surface) 86%, white 14%), var(--surface))" : "var(--surface2)", border: `1px solid ${active ? "var(--primary)" : "var(--border)"}`, borderRadius: 20, padding: 20, boxShadow: plan.featured ? "0 16px 40px rgba(23,163,74,.12)" : "none" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } }, /* @__PURE__ */ React.createElement("strong", { style: { fontSize: 18 } }, plan.name), active ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--primary)" } }, "ACTIVE") : plan.featured ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "#16a34a" } }, "POPULAR") : null), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 28, fontWeight: 800, marginBottom: 6, letterSpacing: "-.03em" } }, plan.price), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--muted)", marginBottom: 12 } }, plan.userLimit === null ? "Unlimited users" : `Up to ${plan.userLimit} users`), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 16, minHeight: 58 } }, plan.blurb), /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gap: 8, marginBottom: 16, fontSize: 12, color: "var(--text)" } }, /* @__PURE__ */ React.createElement("div", null, "Unlimited projects and issues"), /* @__PURE__ */ React.createElement("div", null, "Dashboard and report export"), /* @__PURE__ */ React.createElement("div", null, plan.userLimit === null ? "Best for company-wide adoption" : "Role-based workflow included")), /* @__PURE__ */ React.createElement("button", { className: "btn btn-primary btn-sm", disabled: active || overLimit || !!planSaving, onClick: () => changePlan(plan.code), style: { width: "100%", justifyContent: "center" } }, active ? "Current Plan" : overLimit ? "Too Many Users" : planSaving === plan.code ? "Updating\u2026" : plan.cta), !active && overLimit && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "var(--danger)", marginTop: 8 } }, "Reduce team size before switching."));
-    }))), /* @__PURE__ */ React.createElement("div", { style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 24 } }, /* @__PURE__ */ React.createElement("h3", { style: { fontSize: 14, fontWeight: 600, marginBottom: 20 } }, "Organisation Details"), /* @__PURE__ */ React.createElement("form", { onSubmit: save }, /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Company Photo or Logo"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement(BrandLogo, { src: logoFile ? URL.createObjectURL(logoFile) : org?.logo || BRAND_LOGO, size: 56, rounded: 14 }), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: "file", accept: "image/*", onChange: (e) => setLogoFile(e.target.files?.[0] || null) }))), /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Company Name"), /* @__PURE__ */ React.createElement("input", { className: "form-input", value: form.name, onChange: (e) => setF("name", e.target.value), required: true })), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 28, paddingTop: 24, borderTop: "1px solid var(--border)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 18, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: { fontSize: 14, fontWeight: 600, marginBottom: 4 } }, "Issue Data Source"), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--muted)", lineHeight: 1.6, maxWidth: 620 } }, "Link a Google Sheet or upload an Excel/CSV file for this organisation. Each tab becomes a project and each matching row becomes an issue, just like the existing Twinleaves import flow.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-header" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", null, "Company Settings"), /* @__PURE__ */ React.createElement("p", null, "Manage your organisation"))), /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 960 } }, /* @__PURE__ */ React.createElement("div", { style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 24 } }, /* @__PURE__ */ React.createElement("h3", { style: { fontSize: 14, fontWeight: 600, marginBottom: 20 } }, "Organisation Details"), /* @__PURE__ */ React.createElement("form", { onSubmit: save }, /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Company Photo or Logo"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement(BrandLogo, { src: logoFile ? URL.createObjectURL(logoFile) : org?.logo || BRAND_LOGO, size: 56, rounded: 14 }), /* @__PURE__ */ React.createElement("input", { className: "form-input", type: "file", accept: "image/*", onChange: (e) => setLogoFile(e.target.files?.[0] || null) }))), /* @__PURE__ */ React.createElement("div", { className: "form-group" }, /* @__PURE__ */ React.createElement("label", { className: "form-label" }, "Company Name"), /* @__PURE__ */ React.createElement("input", { className: "form-input", value: form.name, onChange: (e) => setF("name", e.target.value), required: true })), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 28, paddingTop: 24, borderTop: "1px solid var(--border)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 18, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: { fontSize: 14, fontWeight: 600, marginBottom: 4 } }, "Issue Data Source"), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--muted)", lineHeight: 1.6, maxWidth: 620 } }, "Link a Google Sheet or upload an Excel/CSV file for this organisation. Each tab becomes a project and each matching row becomes an issue, just like the existing Twinleaves import flow.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement(
       "button",
       {
         type: "button",
