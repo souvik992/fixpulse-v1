@@ -3,10 +3,27 @@ const { Pool } = require('pg');
 let pool   = null;
 let connected = false;
 
+function buildHostedConfig(databaseUrl) {
+  const url = new URL(databaseUrl);
+
+  // Let node-postgres use our explicit SSL object instead of libpq-style
+  // `sslmode` URL parsing, which can force certificate validation on Aiven.
+  url.searchParams.delete('sslmode');
+  url.searchParams.delete('sslcert');
+  url.searchParams.delete('sslkey');
+  url.searchParams.delete('sslrootcert');
+  url.searchParams.delete('sslcrl');
+
+  return {
+    connectionString: url.toString(),
+    ssl: { rejectUnauthorized: false },
+  };
+}
+
 async function connect() {
   // Neon / hosted: single DATABASE_URL takes priority
   const base = process.env.DATABASE_URL
-    ? { connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }
+    ? buildHostedConfig(process.env.DATABASE_URL)
     : {
         host:     process.env.DB_HOST     || 'localhost',
         port:     parseInt(process.env.DB_PORT || '5432', 10),
@@ -46,4 +63,4 @@ function query(...args) {
   return pool.query(...args);
 }
 
-module.exports = { connect, isConnected, query };
+module.exports = { connect, isConnected, query, pool };
