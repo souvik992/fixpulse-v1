@@ -749,6 +749,8 @@ async function syncTarget(target) {
     let created = 0;
     let updated = 0;
     let skipped = 0;
+    let deleted = 0;
+    const seenSourceRefs = new Set();
 
     for (const sheet of sheets) {
       const projectName = sheet.name === 'WEB POS' ? 'webPOS' : sheet.name;
@@ -757,6 +759,7 @@ async function syncTarget(target) {
       const project = await ensureProject(target, projectName, projectByName, usedKeys, sheet.headers || []);
       for (const sheetIssue of sheet.issues) {
         const issue = { ...sheetIssue, sourceRef: buildSourceRef(target, canonicalTabName, sheetIssue.rowNumber) };
+        seenSourceRefs.add(issue.sourceRef);
         const assignee = issue.assigneeNames[0] ? await ensureUser(target, issue.assigneeNames[0], userByName, usedEmails, developerRoleId) : null;
         const reporter = issue.reporterName ? await ensureUser(target, issue.reporterName, userByName, usedEmails, developerRoleId) : null;
         const sourceHash = hashIssue(issue);
@@ -894,6 +897,18 @@ async function syncTarget(target) {
       }
     }
 
+    // Delete sheet-synced bugs that no longer exist in the sheet
+    const removedRefs = [...existingBySourceRef.keys()].filter(ref => !seenSourceRefs.has(ref));
+    if (removedRefs.length > 0) {
+      const removedIds = removedRefs.map(ref => existingBySourceRef.get(ref).id);
+      await db.query('DELETE FROM notifications WHERE bug_id = ANY($1::uuid[])', [removedIds]);
+      const delResult = await db.query(
+        'DELETE FROM bugs WHERE id = ANY($1::uuid[]) AND source_kind=$2 AND org_id=$3',
+        [removedIds, 'google_sheet', target.id]
+      );
+      deleted = delResult.rowCount;
+    }
+
     const completedAt = new Date().toISOString();
     await db.query(
       `UPDATE organizations
@@ -909,9 +924,10 @@ async function syncTarget(target) {
       created,
       updated,
       skipped,
+      deleted,
       lastError: null,
     });
-    log(`sync complete for ${target.name}: created ${created}, updated ${updated}, skipped ${skipped}`);
+    log(`sync complete for ${target.name}: created ${created}, updated ${updated}, skipped ${skipped}, deleted ${deleted}`);
     return { created, updated, skipped, ok: true };
   } catch (error) {
     await db.query(

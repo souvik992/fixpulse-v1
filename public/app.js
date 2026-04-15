@@ -705,6 +705,7 @@ function useSheetSyncStatus() {
 function SyncTimestamp({ toast, onSyncComplete }) {
   const { syncStatus, refreshSyncStatus } = useSheetSyncStatus();
   const [syncing, setSyncing] = useState(false);
+  const isRunning = syncing || syncStatus?.running;
   const syncDisplay = syncStatus?.lastSuccessAt
     ? new Date(syncStatus.lastSuccessAt).toLocaleString('en-GB', {
         day: '2-digit',
@@ -717,43 +718,58 @@ function SyncTimestamp({ toast, onSyncComplete }) {
     : 'Unavailable';
 
   const runManualSync = async () => {
-    if (syncing || syncStatus?.running) return;
+    if (isRunning) return;
     setSyncing(true);
     try {
       const result = await api.post('/api/sheet-sync/run', {});
       if (result?.error) {
         toast?.(result.error, 'error');
-      } else {
-        toast?.(result.started ? 'Manual data sync started' : 'Data sync is already running', 'info');
-        const pollUntilDone = () => {
-          api.get('/api/sheet-sync/status').then(status => {
-            refreshSyncStatus();
-            if (status?.running) { setTimeout(pollUntilDone, 2000); }
-            else { onSyncComplete?.(); }
-          });
-        };
-        setTimeout(pollUntilDone, 1500);
+        setSyncing(false);
+        return;
       }
-    } finally {
+      toast?.(result.started ? 'Syncing data…' : 'Data sync is already running', 'info');
+      const pollUntilDone = () => {
+        api.get('/api/sheet-sync/status').then(status => {
+          refreshSyncStatus();
+          if (status?.running) {
+            setTimeout(pollUntilDone, 2000);
+          } else {
+            setSyncing(false);
+            onSyncComplete?.();
+          }
+        }).catch(() => setSyncing(false));
+      };
+      setTimeout(pollUntilDone, 1500);
+    } catch {
       setSyncing(false);
     }
   };
 
   return (
     <div style={{marginLeft:'auto', textAlign:'right', display:'flex', alignItems:'center', gap:12, padding:'8px 10px', border:'none', borderRadius:12, background:'transparent'}}>
-      <div>
-        <div style={{fontSize:11, fontWeight:600, color:'var(--text)', textTransform:'uppercase', letterSpacing:'0.04em'}}>Last Data Sync</div>
-        <div style={{fontSize:12, color:'var(--muted)', marginTop:2}}>{syncDisplay}</div>
-      </div>
+      {isRunning && (
+        <div style={{display:'flex', alignItems:'center', gap:8, fontSize:12, color:'var(--primary)', fontWeight:500}}>
+          <svg width="16" height="16" viewBox="0 0 16 16" style={{animation:'btn-spin 1s linear infinite', flexShrink:0}}>
+            <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="10" strokeLinecap="round"/>
+          </svg>
+          Syncing…
+        </div>
+      )}
+      {!isRunning && (
+        <div>
+          <div style={{fontSize:11, fontWeight:600, color:'var(--text)', textTransform:'uppercase', letterSpacing:'0.04em'}}>Last Data Sync</div>
+          <div style={{fontSize:12, color:'var(--muted)', marginTop:2}}>{syncDisplay}</div>
+        </div>
+      )}
       <button
         type="button"
         className="btn btn-ghost btn-sm"
         onClick={runManualSync}
-        disabled={syncing || syncStatus?.running}
+        disabled={isRunning}
         title="Sync data now"
         style={{padding:'8px 10px', minWidth:'40px', minHeight:'40px', borderRadius:10}}
       >
-        {syncing || syncStatus?.running ? '↻' : '⟳'}
+        {isRunning ? '↻' : '⟳'}
       </button>
     </div>
   );
