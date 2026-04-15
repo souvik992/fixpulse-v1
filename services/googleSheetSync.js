@@ -757,6 +757,13 @@ async function syncTarget(target) {
       // Use the normalised project name in source_ref so tab renames never create duplicates
       const canonicalTabName = projectName;
       const project = await ensureProject(target, projectName, projectByName, usedKeys, sheet.headers || []);
+      if (project.sprint_status !== 'active') {
+        // Not an active sprint — preserve existing bugs to avoid deletion, skip updates
+        for (const [ref, bug] of existingBySourceRef) {
+          if (bug.project_id === project.id) seenSourceRefs.add(ref);
+        }
+        continue;
+      }
       for (const sheetIssue of sheet.issues) {
         const issue = { ...sheetIssue, sourceRef: buildSourceRef(target, canonicalTabName, sheetIssue.rowNumber) };
         seenSourceRefs.add(issue.sourceRef);
