@@ -9,7 +9,7 @@ const db = require('../db');
 
 const SYNC_INTERVAL_MS = Math.max(Number(process.env.SHEET_SYNC_INTERVAL_MS || 3600000), 15000);
 const ENABLED = String(process.env.SHEET_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
-const IGNORED_SHEETS = new Set(['Summary', 'Master']);
+const IGNORED_SHEETS = new Set(['Summary', 'Master', 'CANTEEN']);
 const LEGACY_SHEET_ID = process.env.GOOGLE_SHEET_ID || '1a41W8XdllH-lzTBQmO4QCaRQMURAQb0Z7Z2EQjL2jXU';
 const LEGACY_TARGET_ORG_NAME = process.env.GOOGLE_SHEET_TARGET_ORG || 'Twinleaves';
 
