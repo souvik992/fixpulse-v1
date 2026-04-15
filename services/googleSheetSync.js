@@ -654,6 +654,7 @@ async function getSystemRoleId(roleName) {
 async function ensureUser(org, name, userByName, usedEmails, developerRoleId) {
   const normalized = titleCase(name);
   if (!normalized) return null;
+  if (/^\d+$/.test(normalized.replace(/\s+/g, ''))) return null;
   const existing = userByName.get(normalized.toLowerCase());
   if (existing) return existing;
   const email = makePlaceholderEmail(normalized, usedEmails);
